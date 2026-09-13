@@ -1,0 +1,35 @@
+{
+  "name": "@musea/backend",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./convex/_generated/api": "./convex/_generated/api.js",
+    "./convex/_generated/dataModel": "./convex/_generated/dataModel.js"
+  },
+  "scripts": {
+    "dev": "convex dev",
+    "deploy": "convex deploy",
+    "codegen": "convex codegen",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@convex-dev/better-auth": "0.12.5",
+    "@musea/shared": "workspace:*",
+    "@stellar/stellar-sdk": "^17.0.1",
+    "better-auth": "1.6.31",
+    "convex": "^1.45.0"
+  },
+  "devDependencies": {
+    "@musea/eslint-config": "workspace:*",
+    "@musea/typescript-config": "workspace:*",
+    "@types/node": "^22.15.3",
+    "convex-test": "^0.0.38",
+    "eslint": "^9.39.1",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

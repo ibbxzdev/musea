@@ -1,0 +1,14 @@
+{
+  "name": "@musea/tipjar",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Turborepo wrapper around the Rust Soroban TipJar contract. The real work is cargo.",
+  "scripts": {
+    "build": "stellar contract build",
+    "test": "node ../../scripts/cargo-guard.mjs test",
+    "lint": "node ../../scripts/cargo-guard.mjs clippy --all-targets -- -D warnings",
+    "typecheck": "node ../../scripts/cargo-guard.mjs check --all-targets",
+    "fmt": "node ../../scripts/cargo-guard.mjs fmt"
+  }
+}

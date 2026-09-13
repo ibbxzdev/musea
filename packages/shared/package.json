@@ -1,0 +1,25 @@
+{
+  "name": "@musea/shared",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./amounts": "./src/amounts.ts",
+    "./errors": "./src/errors.ts",
+    "./stellar-links": "./src/stellar-links.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@musea/eslint-config": "workspace:*",
+    "@musea/typescript-config": "workspace:*",
+    "eslint": "^9.39.1",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

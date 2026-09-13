@@ -1,0 +1,9 @@
+# stellar-build project config (project-scoped; no global install).
+project_name: musea-tips
+user_name: "ibo"
+planning_artifacts: docs
+implementation_artifacts: docs/stories
+project_knowledge: docs
+communication_language: English
+document_output_language: English
+user_skill_level: intermediate

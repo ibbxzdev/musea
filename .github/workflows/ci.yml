@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # cargo-guard.mjs turns a missing Rust toolchain into a hard failure when CI is set,
+  # so the contract can never be silently skipped here.
+  CI: "true"
+
+jobs:
+  web:
+    name: Lint, typecheck, test (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # turbo --affected diffs against a base commit, so it needs history.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `pnpm check` runs `biome format .` repo-wide first, then turbo. Biome is listed
+      # first deliberately: the --filter below is appended to the script, so it lands on
+      # `turbo run` rather than on Biome, which would not understand it. Formatting is
+      # therefore checked across ALL packages, backend included.
+      #
+      # @musea/backend is excluded: its typecheck needs convex/_generated/, which only
+      # exists after a deployment is configured. Remove this filter once Story 0.2 lands
+      # and a CONVEX_DEPLOY_KEY is available to run `convex codegen` here.
+      - run: pnpm check --filter '!@musea/backend'
+
+  contract:
+    name: Contract (cargo)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/tipjar
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/tipjar
+
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test

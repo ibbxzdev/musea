@@ -1,0 +1,46 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "tui",
+  "globalEnv": ["CI", "NODE_ENV"],
+  "tasks": {
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**",
+        "target/wasm32v1-none/release/*.wasm",
+        "target/wasm32-unknown-unknown/release/*.wasm"
+      ],
+      "env": [
+        "NEXT_PUBLIC_CONVEX_URL",
+        "NEXT_PUBLIC_CONVEX_SITE_URL",
+        "NEXT_PUBLIC_SITE_URL",
+        "NEXT_PUBLIC_STELLAR_NETWORK",
+        "NEXT_PUBLIC_STELLAR_EXPERT_BASE"
+      ]
+    },
+
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+
+    "lint": {
+      "dependsOn": ["transit"]
+    },
+
+    "typecheck": {
+      "dependsOn": ["transit"]
+    },
+
+    "test": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    }
+  }
+}

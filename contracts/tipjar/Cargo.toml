@@ -1,0 +1,32 @@
+[package]
+name = "tipjar"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = "27.0.6"
+
+[dev-dependencies]
+soroban-sdk = { version = "27.0.6", features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+# Keeps `cargo test --release` honest: tests need panics to unwind so #[should_panic]
+# and try_* assertions behave.
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

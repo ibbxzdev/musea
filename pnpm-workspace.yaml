@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "contracts/*"
+
+# pnpm 10+ blocks postinstall scripts unless a dependency is listed here.
+# Both of these need theirs to fetch a platform-specific native binary:
+#   esbuild        — vitest's bundler
+#   unrs-resolver  — ESLint's module resolver
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true

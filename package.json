@@ -1,0 +1,26 @@
+{
+  "name": "musea-tips",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Musea Curator Tips — one-tap USDC tipping on Stellar (testnet), backed by a Soroban TipJar contract.",
+  "license": "MIT",
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "check": "biome format . && turbo run lint typecheck test",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "turbo": "^2.10.12",
+    "typescript": "5.9.3"
+  }
+}
