@@ -134,8 +134,8 @@ export function detailFor(error: unknown): string {
  * The recipient is derived from `gallery.ownerId` and never from anything a client sends.
  *
  * Both failures below are the curator's to fix, not ours: we hold none of their keys, so
- * we can neither fund their account nor add their trustline. The messages name the
- * situation rather than asking the tipper to wait for something that will never happen.
+ * we cannot fund their account for them. The messages name the situation rather than
+ * asking the tipper to wait for something that will never happen.
  */
 export async function resolveCuratorAddress(ctx: ActionCtx, ownerId: Id<"users">): Promise<string> {
   const cfg = stellarConfig();
@@ -147,26 +147,17 @@ export async function resolveCuratorAddress(ctx: ActionCtx, ownerId: Id<"users">
     throw new TipError("CURATOR_NOT_CONNECTED", `Gallery owner ${ownerId} has no linked wallet.`);
   }
 
+  // XLM is the native asset: no trustline, no issuer, nothing for the curator to opt into.
+  // The one precondition left is that the account exists on this network at all — an
+  // address that has never been funded holds nothing and cannot be a payment destination.
   const horizon = new StellarSdk.Horizon.Server(cfg.horizonUrl);
-  let account: Awaited<ReturnType<typeof horizon.loadAccount>>;
   try {
-    account = await horizon.loadAccount(curator.publicKey);
+    await horizon.loadAccount(curator.publicKey);
   } catch {
-    // Linked but never funded on this network — the address exists only as a string.
-    throw new TipError("NO_TRUSTLINE", `Curator account ${curator.publicKey} does not exist.`);
-  }
-
-  // A SAC transfer to an account with no trustline for the asset reverts the whole
-  // invocation with Error(Contract, #13), taking the tipper's fee with it.
-  const hasTrustline = account.balances.some(
-    (balance) =>
-      balance.asset_type !== "native" &&
-      "asset_code" in balance &&
-      balance.asset_code === cfg.usdcAssetCode &&
-      balance.asset_issuer === cfg.usdcIssuer,
-  );
-  if (!hasTrustline) {
-    throw new TipError("NO_TRUSTLINE", `Curator ${curator.publicKey} holds no USDC trustline.`);
+    throw new TipError(
+      "CURATOR_NOT_FUNDED",
+      `Curator account ${curator.publicKey} does not exist on this network.`,
+    );
   }
 
   return curator.publicKey;

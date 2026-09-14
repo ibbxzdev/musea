@@ -2,7 +2,7 @@
 
 import { api } from "@musea/backend/convex/_generated/api";
 import type { Id } from "@musea/backend/convex/_generated/dataModel";
-import { formatUsdc } from "@musea/shared/amounts";
+import { formatXlm } from "@musea/shared/amounts";
 import { useAction } from "convex/react";
 import * as React from "react";
 
@@ -42,7 +42,7 @@ export function GalleryTotalBadge({
       })
       .catch(() => {
         // An RPC hiccup must not turn into a wrong number. Showing nothing is honest;
-        // showing "0 USDC tipped" for a gallery that has been tipped is not.
+        // showing "0 XLM tipped" for a gallery that has been tipped is not.
         if (!cancelled) setFailed(true);
       });
 
@@ -65,7 +65,7 @@ export function GalleryTotalBadge({
 
   return (
     <span className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
-      ◎ {formatUsdc(total)} USDC tipped
+      ◎ {formatXlm(total)} XLM tipped
     </span>
   );
 }

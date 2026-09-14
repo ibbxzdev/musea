@@ -108,38 +108,19 @@ export const prepareExternalTip = internalAction({
       // transfer's inner one with no separately assembled auth entry. Freighter signing
       // as the source is the same shape the managed path gets from a local keypair.
       //
-      // Pre-flight the connected wallet against Horizon before building anything.
-      //
-      // Both failures below would otherwise surface as a simulation error, and the managed
-      // path's wording for them is actively wrong here: it says "still being set up, try
-      // again in a moment", which is true of provisioning we control and false of a wallet
-      // the user owns. Nothing we do will fund their account or add their trustline — only
-      // they can — so the error has to name the action rather than ask them to wait.
+      // Pre-flight the connected wallet against Horizon before building anything. XLM is
+      // native, so there is no trustline to check — only whether the account exists. An
+      // unfunded address would otherwise surface as a simulation error worded as "still
+      // being set up, try again in a moment", which is true of provisioning we control and
+      // false of a wallet the user owns. Nothing we do will fund their account — only they
+      // can — so the error names the action rather than asking them to wait.
       const horizon = new StellarSdk.Horizon.Server(cfg.horizonUrl);
-      let account: Awaited<ReturnType<typeof horizon.loadAccount>>;
       try {
-        account = await horizon.loadAccount(external.publicKey);
+        await horizon.loadAccount(external.publicKey);
       } catch {
         throw new TipError(
           "WALLET_NOT_FUNDED",
           `${external.publicKey} does not exist on this network.`,
-        );
-      }
-
-      // A SAC transfer from an account with no trustline for the asset reverts the whole
-      // invocation with Error(Contract, #13). Catching it here costs one read and turns an
-      // opaque contract error into an instruction.
-      const hasTrustline = account.balances.some(
-        (balance) =>
-          balance.asset_type !== "native" &&
-          "asset_code" in balance &&
-          balance.asset_code === cfg.usdcAssetCode &&
-          balance.asset_issuer === cfg.usdcIssuer,
-      );
-      if (!hasTrustline) {
-        throw new TipError(
-          "WALLET_NO_TRUSTLINE",
-          `${external.publicKey} holds no ${cfg.usdcAssetCode} trustline.`,
         );
       }
 
@@ -296,7 +277,7 @@ export const submitExternalTip = internalAction({
  *
  * Deliberately NOT idempotent on the seed step: "already
  * funded" is observable on-chain and safe to re-check, but "already seeded" is not — an
- * account holding 100 USDC looks the same whether it was seeded once or twice. Re-running
+ * account holding 100 XLM looks the same whether it was seeded once or twice. Re-running
  * this doubles the balance. That is acceptable for a dev helper and would not be for
  * anything user-facing.
  */
@@ -318,41 +299,23 @@ export const fundExternalWallet = internalAction({
 
     const cfg = stellarConfig();
     const horizon = new StellarSdk.Horizon.Server(cfg.horizonUrl);
-    const usdc = new StellarSdk.Asset(cfg.usdcAssetCode, cfg.usdcIssuer);
+    const xlm = StellarSdk.Asset.native();
 
     // ── 1. Friendbot, if the account does not exist yet ───────────────────────────────
+    // With XLM there is no trustline sitting between funding and seeding: a funded account
+    // can receive the native asset immediately.
     let funded = false;
-    let account: Awaited<ReturnType<typeof horizon.loadAccount>> | null = null;
     try {
-      account = await horizon.loadAccount(publicKey);
+      await horizon.loadAccount(publicKey);
     } catch {
       const response = await fetch(`${cfg.friendbotUrl}?addr=${encodeURIComponent(publicKey)}`);
       if (!response.ok) {
         throw new Error(`Friendbot funding failed (HTTP ${response.status}).`);
       }
       funded = true;
-      account = await horizon.loadAccount(publicKey);
     }
 
-    // ── 2. The trustline is the user's to create, not ours ────────────────────────────
-    // It needs a signature from the key we do not hold. Report rather than fail, so the
-    // funding half is not wasted and the next step is obvious.
-    const hasTrustline = account.balances.some(
-      (balance) =>
-        balance.asset_type !== "native" &&
-        "asset_code" in balance &&
-        balance.asset_code === cfg.usdcAssetCode &&
-        balance.asset_issuer === cfg.usdcIssuer,
-    );
-    if (!hasTrustline) {
-      return {
-        funded,
-        seeded: false,
-        note: `Funded with XLM, but ${publicKey} has no ${cfg.usdcAssetCode} trustline. Add it in your wallet (asset ${cfg.usdcAssetCode}, issuer ${cfg.usdcIssuer}), then run this again to receive USDC.`,
-      };
-    }
-
-    // ── 3. Seed from the treasury ─────────────────────────────────────────────────────
+    // ── 2. Seed from the treasury ─────────────────────────────────────────────────────
     const treasury = StellarSdk.Keypair.fromSecret(cfg.treasurySecret);
     const treasuryAccount = await horizon.loadAccount(treasury.publicKey());
     const seedTx = new StellarSdk.TransactionBuilder(treasuryAccount, {
@@ -362,7 +325,7 @@ export const fundExternalWallet = internalAction({
       .addOperation(
         StellarSdk.Operation.payment({
           destination: publicKey,
-          asset: usdc,
+          asset: xlm,
           amount: cfg.seedAmount,
         }),
       )
@@ -374,7 +337,7 @@ export const fundExternalWallet = internalAction({
     return {
       funded,
       seeded: true,
-      note: `Sent ${cfg.seedAmount} ${cfg.usdcAssetCode} to ${publicKey}.`,
+      note: `Sent ${cfg.seedAmount} XLM to ${publicKey}.`,
     };
   },
 });

@@ -4,7 +4,7 @@ import { classifyStellarError, userMessageFor, type TipErrorCode } from "./error
 /**
  * The error map (Story 2.4).
  *
- * The case that motivates most of this: our USDC transfer happens *inside* TipJar via the
+ * The case that motivates most of this: our XLM transfer happens *inside* TipJar via the
  * SAC, so token failures arrive as `Error(Contract, #N)` rather than as the classic
  * operation codes (`op_no_trust`, `op_underfunded`) a direct payment would produce. A
  * classifier that only knows the classic codes reports UNKNOWN for the two most common

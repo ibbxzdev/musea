@@ -25,7 +25,7 @@ export type TipErrorCode =
   | "WALLET_NETWORK_MISMATCH"
   | "WALLET_ADDRESS_CHANGED"
   | "WALLET_NOT_FUNDED"
-  | "WALLET_NO_TRUSTLINE"
+  | "CURATOR_NOT_FUNDED"
   | "CURATOR_NOT_CONNECTED"
   | "SIGNATURE_REJECTED"
   | "TRANSACTION_MISMATCH"
@@ -42,7 +42,7 @@ export const CONTRACT_ERRORS = {
 /**
  * Stellar Asset Contract error variants seen through a contract call.
  *
- * This matters more than it looks. Our USDC transfer happens *inside* TipJar via the SAC,
+ * This matters more than it looks. Our XLM transfer happens *inside* TipJar via the SAC,
  * so token failures surface as `Error(Contract, #N)` from the SAC — not as the classic
  * operation codes (`op_no_trust`, `op_underfunded`) that a direct payment would produce.
  * A classifier that only knows the classic codes reports UNKNOWN for the two most common
@@ -60,7 +60,7 @@ export const SAC_ERRORS = {
 const USER_MESSAGES: Record<TipErrorCode, string> = {
   // No longer "try again in a moment": tips go to the curator's own wallet, so nothing we
   // do on the server can make them ready. Only the curator can, and the message says so.
-  NO_TRUSTLINE: "This curator's wallet can't receive USDC yet.",
+  NO_TRUSTLINE: "This curator can't receive tips right now.",
   CURATOR_NOT_CONNECTED: "This curator hasn't connected a wallet yet, so they can't be tipped.",
   INSUFFICIENT_BALANCE: "Not enough balance.",
   BAD_SEQUENCE: "That didn't go through. Please try again.",
@@ -82,10 +82,12 @@ const USER_MESSAGES: Record<TipErrorCode, string> = {
   // the user switched accounts mid-flow. Submitting would fail on the source account.
   WALLET_ADDRESS_CHANGED: "Freighter switched accounts. Reconnect and try again.",
   // Distinct from ACCOUNT_NOT_FUNDED, which means "our provisioning is still running, wait".
-  // These two are the user's own wallet, and waiting will never fix either — only they can
-  // act, so the message has to say what to do rather than ask for patience.
+  // This is the user's own wallet, and waiting will never fix it — only they can act, so
+  // the message says what to do rather than asking for patience.
   WALLET_NOT_FUNDED: "Your connected wallet has no testnet account yet. Fund it, then retry.",
-  WALLET_NO_TRUSTLINE: "Add a USDC trustline in your wallet, then try again.",
+  // The curator's side of the same problem. XLM needs no trustline, but the destination
+  // account still has to exist on the network before anything can be sent to it.
+  CURATOR_NOT_FUNDED: "This curator's wallet isn't set up on Stellar testnet yet.",
   // Not really an error — the user changed their mind in the wallet popup. The UI
   // dismisses rather than showing this, but a message exists so nothing renders blank.
   SIGNATURE_REJECTED: "Tip cancelled.",

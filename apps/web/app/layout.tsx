@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Musea Curator Tips",
-  description: "Tip a curator in USDC on Stellar — one tap, no wallet to install.",
+  description: "Tip a curator in XLM on Stellar — one tap, no wallet to install.",
 };
 
 export const viewport: Viewport = {

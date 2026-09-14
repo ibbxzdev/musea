@@ -167,7 +167,7 @@ export function TipButton({
       // the screen reads as "nothing happened".
       setOpen(false);
       toast.success(
-        `Tipped ${selected.amount} USDC${curatorHandle ? ` to @${curatorHandle}` : ""}`,
+        `Tipped ${selected.amount} XLM${curatorHandle ? ` to @${curatorHandle}` : ""}`,
         {
           id: toastId,
           duration: 10_000,
@@ -246,7 +246,7 @@ export function TipButton({
           setOpen(next);
         }}
         title={curatorName ? `Tip ${curatorName}` : "Tip this curator"}
-        description="Send testnet USDC through the TipJar contract on Stellar."
+        description="Send testnet XLM through the TipJar contract on Stellar."
       >
         <div className="pb-safe px-5">
           <div className="grid grid-cols-3 gap-2">
@@ -268,7 +268,7 @@ export function TipButton({
                       : "bg-muted/50 hover:bg-muted",
                   )}
                 >
-                  {preset.amount} USDC
+                  {preset.amount} XLM
                 </button>
               );
             })}
@@ -281,7 +281,7 @@ export function TipButton({
             disabled={!canSend}
             className="mt-4 h-12 w-full rounded-full text-base"
           >
-            {sending ? "Sending…" : `Send ${selected.amount} USDC`}
+            {sending ? "Sending…" : `Send ${selected.amount} XLM`}
           </Button>
 
           {blocker?.action ? (
@@ -291,7 +291,7 @@ export function TipButton({
           ) : null}
 
           <p className="mt-3 text-center text-xs text-muted-foreground">
-            Stellar testnet USDC. No real-value assets move.
+            Stellar testnet XLM. No real-value assets move.
           </p>
         </div>
       </ResponsiveModal>

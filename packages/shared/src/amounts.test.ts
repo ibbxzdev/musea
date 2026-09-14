@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   AmountError,
-  formatUsdc,
+  formatXlm,
   fromStroops,
   hasSufficientBalance,
-  STROOPS_PER_USDC,
+  STROOPS_PER_XLM,
   toStroops,
 } from "./amounts.js";
 
@@ -42,12 +42,12 @@ describe("toStroops", () => {
   });
 
   it("survives amounts beyond Number.MAX_SAFE_INTEGER stroops", () => {
-    // ~1 billion USDC is more than 2^53-1 stroops; the bigint path must stay exact.
+    // ~1 billion XLM is more than 2^53-1 stroops; the bigint path must stay exact.
     expect(toStroops("1000000000")).toBe(10_000_000_000_000_000n);
   });
 });
 
-describe("fromStroops / formatUsdc", () => {
+describe("fromStroops / formatXlm", () => {
   it("round-trips", () => {
     for (const v of ["1.0000000", "5.0000000", "0.0000001", "123.4567890"]) {
       expect(fromStroops(toStroops(v))).toBe(v);
@@ -60,10 +60,10 @@ describe("fromStroops / formatUsdc", () => {
   });
 
   it("formats for humans without trailing zeros", () => {
-    expect(formatUsdc(50_000_000n)).toBe("5");
-    expect(formatUsdc(51_000_000n)).toBe("5.1");
-    expect(formatUsdc(0n)).toBe("0");
-    expect(formatUsdc(1n)).toBe("0.0000001");
+    expect(formatXlm(50_000_000n)).toBe("5");
+    expect(formatXlm(51_000_000n)).toBe("5.1");
+    expect(formatXlm(0n)).toBe("0");
+    expect(formatXlm(1n)).toBe("0.0000001");
   });
 });
 
@@ -80,6 +80,6 @@ describe("hasSufficientBalance", () => {
 
 describe("constants", () => {
   it("matches the protocol's 7 decimals", () => {
-    expect(STROOPS_PER_USDC).toBe(10n ** 7n);
+    expect(STROOPS_PER_XLM).toBe(10n ** 7n);
   });
 });

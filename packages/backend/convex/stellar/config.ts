@@ -15,13 +15,19 @@ export type StellarConfig = {
   rpcUrl: string;
   networkPassphrase: string;
   friendbotUrl: string;
-  usdcAssetCode: string;
-  usdcIssuer: string;
-  usdcSacId: string;
+  /**
+   * The native XLM Stellar Asset Contract.
+   *
+   * Tips move XLM, the network's own asset: it has no issuer and needs no trustline, so
+   * there is nothing else about it to configure. This address is *derived* from the
+   * network passphrase rather than chosen — see scripts/setup-testnet.sh — which is why
+   * a testnet value will never work against pubnet.
+   */
+  xlmSacId: string;
   tipjarContractId: string;
   treasuryPublic: string;
   treasurySecret: string;
-  /** Test USDC granted to each newly provisioned wallet, as a display string. */
+  /** Test XLM granted to each newly provisioned wallet, as a display string. */
   seedAmount: string;
 };
 
@@ -53,9 +59,7 @@ export function stellarConfig(): StellarConfig {
     rpcUrl: required("RPC_URL"),
     networkPassphrase: required("NETWORK_PASSPHRASE"),
     friendbotUrl: required("FRIENDBOT_URL"),
-    usdcAssetCode: required("USDC_ASSET_CODE"),
-    usdcIssuer: required("USDC_ISSUER"),
-    usdcSacId: required("USDC_SAC_ID"),
+    xlmSacId: required("XLM_SAC_ID"),
     tipjarContractId: required("TIPJAR_CONTRACT_ID"),
     treasuryPublic: required("TREASURY_PUBLIC"),
     treasurySecret: required("TREASURY_SECRET"),
@@ -73,10 +77,9 @@ export function stellarConfig(): StellarConfig {
     );
   }
 
-  assertShape("USDC_ISSUER", config.usdcIssuer, "G");
   assertShape("TREASURY_PUBLIC", config.treasuryPublic, "G");
   assertShape("TREASURY_SECRET", config.treasurySecret, "S");
-  assertShape("USDC_SAC_ID", config.usdcSacId, "C");
+  assertShape("XLM_SAC_ID", config.xlmSacId, "C");
   assertShape("TIPJAR_CONTRACT_ID", config.tipjarContractId, "C");
 
   cached = config;

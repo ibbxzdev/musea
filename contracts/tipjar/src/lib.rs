@@ -2,18 +2,18 @@
 
 //! # TipJar
 //!
-//! Moves USDC from a tipper to a curator and keeps an on-chain running total per gallery
+//! Moves XLM from a tipper to a curator and keeps an on-chain running total per gallery
 //! and per curator. The totals are the point: they make curator support publicly
 //! verifiable rather than a number our own database asserts.
 //!
 //! Design decisions worth knowing before you change anything here:
 //!
-//! - **The USDC SAC address is set once, at construction, and is never a call parameter.**
+//! - **The XLM SAC address is set once, at construction, and is never a call parameter.**
 //!   If callers could pass the token address, anyone could invoke `tip` with a worthless
 //!   token they control and inflate a gallery's total for free. Fixing it at construction
 //!   is the allowlist.
 //!
-//! - **Amounts are `i128` in stroops** (1 USDC = 10_000_000). The client converts; this
+//! - **Amounts are `i128` in stroops** (1 XLM = 10_000_000). The client converts; this
 //!   contract never sees a decimal.
 //!
 //! - **`from` must be the transaction source** in our flow, so the source signature
@@ -24,7 +24,8 @@
 //!   gallery's headline number wrong forever; persistent storage has no undo.
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, BytesN, Env,
+    contract, contracterror, contractevent, contractimpl, contracttype,
+    token::Client as TokenClient, Address, BytesN, Env,
 };
 
 #[contracterror]
@@ -40,8 +41,8 @@ pub enum Error {
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
-    /// Address of the USDC SAC. Set at construction, read-only thereafter.
-    Usdc,
+    /// Address of the XLM SAC. Set at construction, read-only thereafter.
+    Token,
     /// Running total tipped to a gallery, keyed by sha256(convex gallery id).
     GalleryTotal(BytesN<32>),
     /// Running total received by a curator.
@@ -66,12 +67,12 @@ pub struct TipJar;
 
 #[contractimpl]
 impl TipJar {
-    /// Runs once at deploy time. `usdc` is the USDC SAC contract address.
-    pub fn __constructor(env: Env, usdc: Address) {
-        env.storage().instance().set(&DataKey::Usdc, &usdc);
+    /// Runs once at deploy time. `token` is the XLM SAC contract address.
+    pub fn __constructor(env: Env, token: Address) {
+        env.storage().instance().set(&DataKey::Token, &token);
     }
 
-    /// Tip `amount` stroops of USDC from `from` to `to`, attributed to `gallery`.
+    /// Tip `amount` stroops of XLM from `from` to `to`, attributed to `gallery`.
     pub fn tip(
         env: Env,
         from: Address,
@@ -88,16 +89,16 @@ impl TipJar {
             return Err(Error::SelfTip);
         }
 
-        let usdc: Address = env
+        let token: Address = env
             .storage()
             .instance()
-            .get(&DataKey::Usdc)
+            .get(&DataKey::Token)
             .ok_or(Error::NotInitialized)?;
 
         // Move the money first. If this traps (insufficient balance, no trustline), the
         // whole invocation reverts and no total is recorded — totals can never describe
         // a transfer that did not happen.
-        token::Client::new(&env, &usdc).transfer(&from, &to, &amount);
+        TokenClient::new(&env, &token).transfer(&from, &to, &amount);
 
         let g_key = DataKey::GalleryTotal(gallery.clone());
         let g_total: i128 = env.storage().persistent().get(&g_key).unwrap_or(0);
@@ -115,7 +116,9 @@ impl TipJar {
             .persistent()
             .extend_ttl(&c_key, TTL_THRESHOLD, TTL_EXTEND_TO);
 
-        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 
         TipEvent {
             from,
@@ -144,12 +147,12 @@ impl TipJar {
             .unwrap_or(0)
     }
 
-    /// The USDC SAC this contract is bound to. Exposed so the backend can assert at
+    /// The XLM SAC this contract is bound to. Exposed so the backend can assert at
     /// startup that it is pointed at the same token it thinks it is.
-    pub fn usdc(env: Env) -> Result<Address, Error> {
+    pub fn token(env: Env) -> Result<Address, Error> {
         env.storage()
             .instance()
-            .get(&DataKey::Usdc)
+            .get(&DataKey::Token)
             .ok_or(Error::NotInitialized)
     }
 }

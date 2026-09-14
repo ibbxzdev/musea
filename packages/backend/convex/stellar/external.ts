@@ -70,7 +70,7 @@ export const getMyExternalWallet = query({
  * connected one cannot be paid. Without this the tipper finds that out *after* choosing an
  * amount and tapping Send, which is a dead end dressed up as a working button.
  *
- * Only checks that a wallet is linked — whether it is funded and holds a USDC trustline
+ * Only checks that a wallet is linked — whether the account actually exists on the network
  * needs Horizon, which a query cannot reach. `prepareTip` still does the full check before
  * anything is signed; this exists to stop the obvious case early, not to replace it.
  *

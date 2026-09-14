@@ -23,22 +23,22 @@ use soroban_sdk::{
 struct Fixture {
     env: Env,
     client: TipJarClient<'static>,
-    usdc: token::Client<'static>,
-    usdc_admin: token::StellarAssetClient<'static>,
+    token: token::Client<'static>,
+    token_admin: token::StellarAssetClient<'static>,
     tipper: Address,
     curator: Address,
     gallery: BytesN<32>,
 }
 
-const ONE_USDC: i128 = 10_000_000;
+const ONE_XLM: i128 = 10_000_000;
 
 fn setup() -> Fixture {
     let env = Env::default();
 
     let issuer = Address::generate(&env);
     let sac = env.register_stellar_asset_contract_v2(issuer);
-    let usdc_admin = token::StellarAssetClient::new(&env, &sac.address());
-    let usdc = token::Client::new(&env, &sac.address());
+    let token_admin = token::StellarAssetClient::new(&env, &sac.address());
+    let token = token::Client::new(&env, &sac.address());
 
     let contract_id = env.register(TipJar, (sac.address(),));
     let client = TipJarClient::new(&env, &contract_id);
@@ -49,23 +49,24 @@ fn setup() -> Fixture {
         gallery: BytesN::random(&env),
         env,
         client,
-        usdc,
-        usdc_admin,
+        token,
+        token_admin,
     }
 }
 
 #[test]
-fn tip_moves_usdc_and_records_totals() {
+fn tip_moves_xlm_and_records_totals() {
     let f = setup();
     f.env.mock_all_auths();
-    f.usdc_admin.mint(&f.tipper, &(100 * ONE_USDC));
+    f.token_admin.mint(&f.tipper, &(100 * ONE_XLM));
 
-    f.client.tip(&f.tipper, &f.curator, &f.gallery, &(5 * ONE_USDC));
+    f.client
+        .tip(&f.tipper, &f.curator, &f.gallery, &(5 * ONE_XLM));
 
-    assert_eq!(f.usdc.balance(&f.tipper), 95 * ONE_USDC);
-    assert_eq!(f.usdc.balance(&f.curator), 5 * ONE_USDC);
-    assert_eq!(f.client.gallery_total(&f.gallery), 5 * ONE_USDC);
-    assert_eq!(f.client.curator_total(&f.curator), 5 * ONE_USDC);
+    assert_eq!(f.token.balance(&f.tipper), 95 * ONE_XLM);
+    assert_eq!(f.token.balance(&f.curator), 5 * ONE_XLM);
+    assert_eq!(f.client.gallery_total(&f.gallery), 5 * ONE_XLM);
+    assert_eq!(f.client.curator_total(&f.curator), 5 * ONE_XLM);
 }
 
 #[test]
@@ -74,40 +75,43 @@ fn totals_accumulate_across_tips_and_tippers() {
     f.env.mock_all_auths();
 
     let tipper2 = Address::generate(&f.env);
-    f.usdc_admin.mint(&f.tipper, &(100 * ONE_USDC));
-    f.usdc_admin.mint(&tipper2, &(100 * ONE_USDC));
+    f.token_admin.mint(&f.tipper, &(100 * ONE_XLM));
+    f.token_admin.mint(&tipper2, &(100 * ONE_XLM));
 
-    f.client.tip(&f.tipper, &f.curator, &f.gallery, &(5 * ONE_USDC));
-    f.client.tip(&tipper2, &f.curator, &f.gallery, &(10 * ONE_USDC));
+    f.client
+        .tip(&f.tipper, &f.curator, &f.gallery, &(5 * ONE_XLM));
+    f.client
+        .tip(&tipper2, &f.curator, &f.gallery, &(10 * ONE_XLM));
 
-    assert_eq!(f.client.gallery_total(&f.gallery), 15 * ONE_USDC);
-    assert_eq!(f.client.curator_total(&f.curator), 15 * ONE_USDC);
+    assert_eq!(f.client.gallery_total(&f.gallery), 15 * ONE_XLM);
+    assert_eq!(f.client.curator_total(&f.curator), 15 * ONE_XLM);
 }
 
 #[test]
 fn totals_are_scoped_per_gallery() {
     let f = setup();
     f.env.mock_all_auths();
-    f.usdc_admin.mint(&f.tipper, &(100 * ONE_USDC));
+    f.token_admin.mint(&f.tipper, &(100 * ONE_XLM));
 
     let other_gallery = BytesN::random(&f.env);
-    f.client.tip(&f.tipper, &f.curator, &f.gallery, &(5 * ONE_USDC));
+    f.client
+        .tip(&f.tipper, &f.curator, &f.gallery, &(5 * ONE_XLM));
 
-    assert_eq!(f.client.gallery_total(&f.gallery), 5 * ONE_USDC);
+    assert_eq!(f.client.gallery_total(&f.gallery), 5 * ONE_XLM);
     assert_eq!(f.client.gallery_total(&other_gallery), 0);
     // The curator's lifetime total spans galleries, though.
-    assert_eq!(f.client.curator_total(&f.curator), 5 * ONE_USDC);
+    assert_eq!(f.client.curator_total(&f.curator), 5 * ONE_XLM);
 }
 
 #[test]
 fn rejects_self_tip() {
     let f = setup();
     f.env.mock_all_auths();
-    f.usdc_admin.mint(&f.tipper, &(100 * ONE_USDC));
+    f.token_admin.mint(&f.tipper, &(100 * ONE_XLM));
 
     let err = f
         .client
-        .try_tip(&f.tipper, &f.tipper, &f.gallery, &ONE_USDC)
+        .try_tip(&f.tipper, &f.tipper, &f.gallery, &ONE_XLM)
         .err();
     assert_eq!(err, Some(Ok(Error::SelfTip)));
 }
@@ -116,15 +120,17 @@ fn rejects_self_tip() {
 fn rejects_zero_and_negative_amounts() {
     let f = setup();
     f.env.mock_all_auths();
-    f.usdc_admin.mint(&f.tipper, &(100 * ONE_USDC));
+    f.token_admin.mint(&f.tipper, &(100 * ONE_XLM));
 
     assert_eq!(
-        f.client.try_tip(&f.tipper, &f.curator, &f.gallery, &0).err(),
+        f.client
+            .try_tip(&f.tipper, &f.curator, &f.gallery, &0)
+            .err(),
         Some(Ok(Error::InvalidAmount))
     );
     assert_eq!(
         f.client
-            .try_tip(&f.tipper, &f.curator, &f.gallery, &-ONE_USDC)
+            .try_tip(&f.tipper, &f.curator, &f.gallery, &-ONE_XLM)
             .err(),
         Some(Ok(Error::InvalidAmount))
     );
@@ -132,12 +138,14 @@ fn rejects_zero_and_negative_amounts() {
 
 #[test]
 fn failed_transfer_records_no_total() {
-    // The tipper has no USDC at all, so the SAC transfer traps and the whole invocation
+    // The tipper has no XLM at all, so the SAC transfer traps and the whole invocation
     // reverts. The gallery total must not have moved.
     let f = setup();
     f.env.mock_all_auths();
 
-    let result = f.client.try_tip(&f.tipper, &f.curator, &f.gallery, &ONE_USDC);
+    let result = f
+        .client
+        .try_tip(&f.tipper, &f.curator, &f.gallery, &ONE_XLM);
     assert!(result.is_err());
     assert_eq!(f.client.gallery_total(&f.gallery), 0);
     assert_eq!(f.client.curator_total(&f.curator), 0);
@@ -154,9 +162,9 @@ fn tip_requires_tipper_auth() {
     // Minting needs the issuer's auth; grant everything for setup, then switch to the
     // scoped entries — `mock_auths` replaces recording mode, it does not stack with it.
     f.env.mock_all_auths();
-    f.usdc_admin.mint(&f.tipper, &(100 * ONE_USDC));
+    f.token_admin.mint(&f.tipper, &(100 * ONE_XLM));
 
-    let amount = 5 * ONE_USDC;
+    let amount = 5 * ONE_XLM;
     let args: soroban_sdk::Vec<soroban_sdk::Val> = (
         f.tipper.clone(),
         f.curator.clone(),
@@ -168,7 +176,7 @@ fn tip_requires_tipper_auth() {
         (f.tipper.clone(), f.curator.clone(), amount).into_val(&f.env);
 
     let sub = [MockAuthInvoke {
-        contract: &f.usdc.address,
+        contract: &f.token.address,
         fn_name: "transfer",
         args: transfer_args,
         sub_invokes: &[],
@@ -190,8 +198,8 @@ fn tip_requires_tipper_auth() {
     // `env.auths()` is deliberately not asserted here: it only records under
     // `mock_all_auths`, and returns empty in the enforcing mode `mock_auths` puts us in.
     // Case 2 below is what proves authorization is enforced.
-    assert_eq!(f.usdc.balance(&f.tipper), 95 * ONE_USDC);
-    assert_eq!(f.usdc.balance(&f.curator), amount);
+    assert_eq!(f.token.balance(&f.tipper), 95 * ONE_XLM);
+    assert_eq!(f.token.balance(&f.curator), amount);
     assert_eq!(f.client.gallery_total(&f.gallery), amount);
 
     // 2. The identical invocation, authorized by somebody else: must be refused. This is
@@ -206,19 +214,19 @@ fn tip_requires_tipper_auth() {
         f.client
             .try_tip(&f.tipper, &f.curator, &f.gallery, &amount)
             .is_err(),
-        "a tip authorized by an address other than `from` must not move the tipper's USDC"
+        "a tip authorized by an address other than `from` must not move the tipper's XLM"
     );
     assert_eq!(
-        f.usdc.balance(&f.curator),
+        f.token.balance(&f.curator),
         amount,
         "the refused tip must not have moved anything"
     );
 }
 
 #[test]
-fn usdc_address_is_fixed_at_construction() {
+fn token_address_is_fixed_at_construction() {
     let f = setup();
-    assert_eq!(f.client.usdc(), f.usdc.address);
+    assert_eq!(f.client.token(), f.token.address);
 }
 
 #[test]
@@ -232,9 +240,10 @@ fn unknown_gallery_reads_zero() {
 fn emits_tip_event() {
     let f = setup();
     f.env.mock_all_auths();
-    f.usdc_admin.mint(&f.tipper, &(100 * ONE_USDC));
+    f.token_admin.mint(&f.tipper, &(100 * ONE_XLM));
 
-    f.client.tip(&f.tipper, &f.curator, &f.gallery, &(5 * ONE_USDC));
+    f.client
+        .tip(&f.tipper, &f.curator, &f.gallery, &(5 * ONE_XLM));
 
     // The invocation also emits the SAC's own `transfer` event, so narrow to ours before
     // asserting — otherwise this would pass on the token's event alone.
@@ -243,7 +252,7 @@ fn emits_tip_event() {
         from: f.tipper.clone(),
         to: f.curator.clone(),
         gallery: f.gallery.clone(),
-        amount: 5 * ONE_USDC,
+        amount: 5 * ONE_XLM,
     };
     assert_eq!(
         ours,

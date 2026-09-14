@@ -198,7 +198,7 @@ export default defineSchema({
    * reader.
    *
    * It is still declared **only because rows exist**, and Convex refuses to push a schema
-   * that omits a populated table. Those rows hold testnet USDC in accounts nobody can now
+   * that omits a populated table. Those rows hold testnet XLM in accounts nobody can now
    * spend from, so purging them destroys (worthless) funds — a deliberate decision, not a
    * cleanup to slip into an unrelated change.
    *
@@ -216,7 +216,7 @@ export default defineSchema({
     funded: v.boolean(),
     trustlineReady: v.boolean(),
     seeded: v.boolean(),
-    /** Last known USDC balance in stroops, stored as a string (bigint isn't a Convex type). */
+    /** Last known XLM balance in stroops, stored as a string (bigint isn't a Convex type). */
     cachedBalanceStroops: v.optional(v.string()),
     balanceUpdatedAt: v.optional(v.number()),
     createdAt: v.number(),

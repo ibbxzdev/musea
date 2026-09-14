@@ -2,8 +2,14 @@
 #
 # One-time (well — once per testnet reset) Stellar testnet bootstrap.
 #
-# Creates the three project identities, issues the Musea test USDC asset, deploys its
-# Stellar Asset Contract, and prints the environment variables to paste into Convex.
+# Creates the two project identities, resolves the native XLM Stellar Asset Contract,
+# deploys the TipJar contract against it, and prints the environment variables to paste
+# into Convex.
+#
+# Tips move XLM, the network's native asset. That means there is no asset to issue, no
+# issuer identity, and no trustline for anyone — the treasury included. Friendbot is the
+# faucet. If this ever moves back to an issued asset, the change-trust and mint steps
+# removed here are in the git history.
 #
 # Stellar testnet is wiped roughly quarterly. When that happens every account and contract
 # below vanishes and you re-run this script — which is the entire reason it is a script
@@ -16,7 +22,6 @@ set -euo pipefail
 
 NETWORK="${NETWORK:-testnet}"
 SEED_AMOUNT="${SEED_AMOUNT:-100}"
-TREASURY_MINT="${TREASURY_MINT:-1000000}"
 
 step() { printf "\n\033[1;34m==>\033[0m %s\n" "$1"; }
 warn() { printf "\033[1;33mwarning:\033[0m %s\n" "$1" >&2; }
@@ -29,7 +34,9 @@ command -v openssl >/dev/null 2>&1 || die "openssl not found; needed to generate
 # ---------------------------------------------------------------------------
 step "Creating and funding identities"
 # ---------------------------------------------------------------------------
-for name in musea-issuer musea-treasury musea-deployer; do
+# No issuer any more: nobody issues XLM. The treasury holds the XLM that seeds new
+# wallets, and the deployer owns the TipJar contract.
+for name in musea-treasury musea-deployer; do
   if stellar keys address "$name" >/dev/null 2>&1; then
     echo "  $name already exists — reusing"
   else
@@ -40,51 +47,32 @@ for name in musea-issuer musea-treasury musea-deployer; do
   fi
 done
 
-ISSUER="$(stellar keys address musea-issuer)"
 TREASURY="$(stellar keys address musea-treasury)"
 DEPLOYER="$(stellar keys address musea-deployer)"
 
-echo "  issuer:   $ISSUER"
 echo "  treasury: $TREASURY"
 echo "  deployer: $DEPLOYER"
 
 # ---------------------------------------------------------------------------
-step "Deploying the USDC Stellar Asset Contract (SAC)"
+step "Resolving the native XLM Stellar Asset Contract (SAC)"
 # ---------------------------------------------------------------------------
-# We issue our own test USDC rather than using Circle's testnet asset, so we control the
-# faucet. Switching to Circle's later is a config change, not a code change.
-if ! USDC_SAC_ID="$(stellar contract asset deploy \
-      --asset "USDC:$ISSUER" \
-      --source musea-issuer \
+# The native SAC address is derived from the network passphrase, not chosen — every
+# network has exactly one and it is the same for everybody. It is normally already
+# deployed on testnet, so a failed deploy here is expected and not an error.
+if ! XLM_SAC_ID="$(stellar contract asset deploy \
+      --asset native \
+      --source musea-deployer \
       --network "$NETWORK" 2>/dev/null)"; then
-  warn "SAC deploy failed — it may already exist. Fetching its id instead."
-  USDC_SAC_ID="$(stellar contract id asset --asset "USDC:$ISSUER" --network "$NETWORK")"
+  XLM_SAC_ID="$(stellar contract id asset --asset native --network "$NETWORK")"
+  echo "  already deployed — using the existing instance"
 fi
-echo "  USDC SAC: $USDC_SAC_ID"
+echo "  XLM SAC: $XLM_SAC_ID"
 
-# ---------------------------------------------------------------------------
-step "Funding the treasury with test USDC"
-# ---------------------------------------------------------------------------
-# The treasury must hold a USDC trustline BEFORE it can be minted to. `mint` does not
-# create one: without it the SAC fails simulation with Error(Contract, #13),
-# "trustline entry is missing for account". Verified against stellar-cli 28 on testnet.
-#
-# This is also why `provisionWallet` has to establish a trustline for every new user
-# wallet before seeding it — same constraint, same failure.
-stellar tx new change-trust \
-  --source-account musea-treasury \
-  --line "USDC:$ISSUER" \
-  --network "$NETWORK"
-echo "  treasury trustline established"
-
-stellar contract invoke \
-  --id "$USDC_SAC_ID" \
-  --source musea-issuer \
-  --network "$NETWORK" \
-  -- mint \
-  --to "$TREASURY" \
-  --amount "$(( TREASURY_MINT * 10000000 ))"
-echo "  minted $TREASURY_MINT USDC to the treasury"
+# The treasury needs no trustline and no minting: Friendbot funded it with XLM above,
+# and XLM is what it hands out. Nothing to do here beyond confirming it has a balance.
+step "Checking the treasury balance"
+stellar keys fund musea-treasury --network "$NETWORK" 2>/dev/null || true
+echo "  treasury funded (Friendbot tops up to 10,000 XLM)"
 
 # ---------------------------------------------------------------------------
 step "Building and deploying the TipJar contract"
@@ -103,14 +91,13 @@ TIPJAR_CONTRACT_ID="$(stellar contract deploy \
   --source musea-deployer \
   --network "$NETWORK" \
   -- \
-  --usdc "$USDC_SAC_ID")"
+  --token "$XLM_SAC_ID")"
 echo "  TipJar: $TIPJAR_CONTRACT_ID"
 
 # ---------------------------------------------------------------------------
 step "Environment variables"
 # ---------------------------------------------------------------------------
 TREASURY_SECRET="$(stellar keys show musea-treasury)"
-MASTER_KEY="$(openssl rand -base64 32)"
 AUTH_SECRET="$(openssl rand -base64 32)"
 
 cat <<CONFIG
@@ -123,21 +110,21 @@ or run each as: npx convex env set NAME 'value'
   RPC_URL=https://soroban-testnet.stellar.org
   NETWORK_PASSPHRASE=Test SDF Network ; September 2015
   FRIENDBOT_URL=https://friendbot.stellar.org
-  USDC_ASSET_CODE=USDC
-  USDC_ISSUER=$ISSUER
-  USDC_SAC_ID=$USDC_SAC_ID
+  XLM_SAC_ID=$XLM_SAC_ID
   TIPJAR_CONTRACT_ID=$TIPJAR_CONTRACT_ID
   TREASURY_PUBLIC=$TREASURY
   TREASURY_SECRET=$TREASURY_SECRET
   SEED_AMOUNT=$SEED_AMOUNT
-  MASTER_ENCRYPTION_KEY=$MASTER_KEY
   BETTER_AUTH_SECRET=$AUTH_SECRET
+
+If you are migrating an existing deployment, remove the variables that no longer
+exist, or stellarConfig() will keep validating values nothing reads:
+  npx convex env remove USDC_ASSET_CODE
+  npx convex env remove USDC_ISSUER
+  npx convex env remove USDC_SAC_ID
+  npx convex env remove MASTER_ENCRYPTION_KEY
 
 Verify the deploy:
   https://stellar.expert/explorer/testnet/contract/$TIPJAR_CONTRACT_ID
 
 CONFIG
-
-warn "TREASURY_SECRET and MASTER_ENCRYPTION_KEY are printed above. They are secrets:"
-warn "  - do not commit them, paste them into an issue, or send them to the client"
-warn "  - if this terminal is being recorded, clear the scrollback now"

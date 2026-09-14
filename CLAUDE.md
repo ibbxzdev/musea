@@ -1,6 +1,6 @@
 # Musea Curator Tips — agent guide
 
-One-tap USDC tipping on **Stellar testnet**, backed by a Soroban contract that keeps
+One-tap XLM tipping on **Stellar testnet**, backed by a Soroban contract that keeps
 per-gallery tip totals on-chain. 30-day Instaward scope.
 
 **Read before writing code:**
@@ -160,7 +160,7 @@ carefully — "Done" and "Done, v1 custody" mean very different things.
 | Monorepo, configs, lint rules, CI-able task graph | Done |
 | `packages/shared` stroop math + error map | Done, tested. Error map needs passkey/relayer codes |
 | Convex schema, auth guards, DB helpers, config validation | Done; codegen run, typechecks against a live dev deployment |
-| `contracts/tipjar/` | **Done and unaffected by the custody change.** 10/10 tests, clippy clean, deployed `CAIH6NCC…`, sample tip `de7dbf02…` |
+| `contracts/tipjar/` | **Done. Redeployed for the XLM cutover** — the token is a constructor arg, so only the binding changed. 10/10 tests, clippy clean, deployed `CCZPKSRP…` bound to the native SAC `CDLZFC3S…`, sample tip `762d5d84…`, and a zero-trustline recipient proved at `d0eb9b53…`. The old USDC deployment `CAIH6NCC…` is retired |
 | `convex/auth.ts` + `auth.config.ts` Better Auth wiring | Done. Safari device pass outstanding |
 | Musea app (artifacts, galleries, filing, profile) | Done and on a live dev deployment. Ported from the iOS repo; 34 backend tests, `convex-authz` clean |
 | `convex/stellar/crypto.ts`, `walletsNode.ts` provisioning | **Done, v1 custody — to be removed.** Keypair + Friendbot + encrypted secret. Superseded by Story 2.1 |
@@ -184,16 +184,21 @@ out unless someone decides otherwise: the LLM enrichment and auto-filer (`ai.ts`
 index), RevenueCat and the paywall, and everything native (share extension, secure store,
 local drafts). Link enrichment survives because it is oEmbed and Open Graph, not AI.
 
-**Trustline before balance — for classic accounts.** A SAC `mint` or `transfer` to a
-**classic `G…` account** with no trustline for the asset fails with `Error(Contract, #13)`,
-and `mint` does not create one. This bit `setup-testnet.sh`, and it still governs the
-issuer and treasury.
+**Tips move XLM, the native asset — there are no trustlines anywhere.** This reversed the
+SOW's USDC commitment at the project owner's direction, after every curator who connected
+a Freighter wallet hit `NO_TRUSTLINE`: the project minted its own test USDC, and only the
+nine accounts `setup-testnet.sh` created had ever opted into it. XLM needs no opt-in, so
+the only remaining precondition on either side is that the account exists on the network.
 
-> **Unverified, and it changes provisioning:** a smart account is a **contract `C…`
-> address**, and SAC balances for contract addresses live in the SAC's own storage rather
-> than as classic trustlines — so there may be no trustline step for the tipper at all.
-> Prove this on testnet in the first hour of Story 2.1 before designing around either
-> answer. The treasury is classic and definitely still needs one.
+> **The SOW still says USDC** — project name, both deliverables, every weekly milestone,
+> and the demo-video acceptance criteria. That gap is open and deliberate, not an
+> oversight. See §4 and Deliverable 2; squaring it with the funder is the owner's call.
+
+> The trustline machinery is gone, not disabled: no `changeTrust`, no asset issuance, no
+> `mint`. If this ever moves back to an issued asset — Circle's real USDC on mainnet, say
+> — the removed steps are in the git history of `scripts/setup-testnet.sh`, and the
+> `NO_TRUSTLINE` code and its `Error(Contract, #13)` classifier were kept for exactly that
+> reason.
 
 ---
 
@@ -220,7 +225,7 @@ Installed and worth invoking:
 ## Conventions
 
 **Money.** Stroops (`bigint`) are authoritative; display strings are derived. Always go
-through `@musea/shared` — `toStroops` / `fromStroops` / `formatUsdc`. Never `amount * 1e7`.
+through `@musea/shared` — `toStroops` / `fromStroops` / `formatXlm`. Never `amount * 1e7`.
 Convex has no bigint type, so stroops are persisted as **strings**.
 
 **Soroban lifecycle.** Contract calls are build → simulate → **assemble** → sign → send →
