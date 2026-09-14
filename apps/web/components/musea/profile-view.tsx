@@ -11,7 +11,6 @@ import {
   UserRoundMinus,
   UserRoundPen,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -19,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { authClient } from "@/lib/auth-client";
+import { authClient, leaveAuthenticatedApp } from "@/lib/auth-client";
 import { initialsOf } from "@/lib/musea/format";
 import type { Viewer } from "@/lib/musea/types";
 import { cn } from "@/lib/utils";
@@ -110,14 +109,13 @@ export function ProfileView() {
 }
 
 function SignOutRow() {
-  const router = useRouter();
   const [busy, setBusy] = React.useState(false);
 
   const signOut = async () => {
     setBusy(true);
     try {
       await authClient.signOut();
-      router.push("/sign-in");
+      leaveAuthenticatedApp();
     } catch {
       toast.error("Could not sign out.");
       setBusy(false);
@@ -222,7 +220,6 @@ function DeleteAccountModal({
   onOpenChange: (open: boolean) => void;
 }) {
   const deleteAccount = useMutation(api.users.deleteAccount);
-  const router = useRouter();
 
   const [confirmation, setConfirmation] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -234,7 +231,9 @@ function DeleteAccountModal({
     setBusy(true);
     try {
       await deleteAccount({});
-      router.push("/sign-in");
+      // Same reasoning as sign-out, and more pressing: the account is gone, so any
+      // surviving in-memory token now authenticates as a user who does not exist.
+      leaveAuthenticatedApp();
     } catch {
       toast.error("Could not delete the account.");
       setBusy(false);

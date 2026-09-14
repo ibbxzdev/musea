@@ -17,6 +17,7 @@ import type * as http from "../http.js";
 import type * as linkPreview from "../linkPreview.js";
 import type * as model_artifacts from "../model/artifacts.js";
 import type * as model_auth from "../model/auth.js";
+import type * as model_walletAuth from "../model/walletAuth.js";
 import type * as seed from "../seed.js";
 import type * as stellar_config from "../stellar/config.js";
 import type * as stellar_external from "../stellar/external.js";
@@ -24,6 +25,7 @@ import type * as stellar_externalNode from "../stellar/externalNode.js";
 import type * as stellar_internal from "../stellar/internal.js";
 import type * as stellar_tips from "../stellar/tips.js";
 import type * as stellar_tipsNode from "../stellar/tipsNode.js";
+import type * as stellar_webAuthNode from "../stellar/webAuthNode.js";
 import type * as tips from "../tips.js";
 import type * as users from "../users.js";
 
@@ -43,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   linkPreview: typeof linkPreview;
   "model/artifacts": typeof model_artifacts;
   "model/auth": typeof model_auth;
+  "model/walletAuth": typeof model_walletAuth;
   seed: typeof seed;
   "stellar/config": typeof stellar_config;
   "stellar/external": typeof stellar_external;
@@ -50,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   "stellar/internal": typeof stellar_internal;
   "stellar/tips": typeof stellar_tips;
   "stellar/tipsNode": typeof stellar_tipsNode;
+  "stellar/webAuthNode": typeof stellar_webAuthNode;
   tips: typeof tips;
   users: typeof users;
 }>;

@@ -8,6 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { copyLink } from "@/lib/musea/clipboard";
 import type { Artifact } from "@/lib/musea/types";
 import { cn } from "@/lib/utils";
 import { SourceMark } from "./source-badge";
@@ -196,6 +197,11 @@ function StatusChip({ status, className }: { status: Artifact["status"]; classNa
  * visible — `group-hover` alone would make it unreachable on a phone.
  */
 function ArtifactMenu({ artifact, actions }: { artifact: Artifact; actions: ArtifactCardActions }) {
+  // Hoisted so the `source &&` guard below narrows it for the copy handler too. Narrowing
+  // a property access does not survive into a callback, and the alternative is a cast that
+  // would keep compiling if `source` ever stopped being guaranteed here.
+  const source = artifact.source;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -215,12 +221,26 @@ function ArtifactMenu({ artifact, actions }: { artifact: Artifact; actions: Arti
             Add to gallery
           </DropdownMenuItem>
         )}
-        {artifact.source && (
-          <DropdownMenuItem asChild>
-            <a href={artifact.source} target="_blank" rel="noreferrer noopener">
-              Open original
-            </a>
-          </DropdownMenuItem>
+        {/*
+          Both items are gated on `source` because an artifact does not always have one —
+          an uploaded image has no page to go back to, and "Copy link" with nothing to copy
+          is worse than an item that is not there.
+
+          The link copied is the *original* source URL, not a Musea one: artifacts have no
+          route of their own (they open in a modal over whichever grid you were in), so
+          there is no per-artifact address to share.
+        */}
+        {source && (
+          <>
+            <DropdownMenuItem asChild>
+              <a href={source} target="_blank" rel="noreferrer noopener">
+                Open original
+              </a>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => copyLink(source, "Link copied")}>
+              Copy link
+            </DropdownMenuItem>
+          </>
         )}
         {actions.onDelete && (
           <>

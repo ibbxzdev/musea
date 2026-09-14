@@ -160,3 +160,52 @@ export const getOwnedPendingTip = internalQuery({
     return tip;
   },
 });
+
+/**
+ * Link a wallet to the Musea profile behind a Better Auth subject.
+ *
+ * The wallet sign-in plugin (convex/model/walletAuth.ts) knows the Better Auth user id,
+ * because that is what it just created a session for. It does not know the `users._id`,
+ * and it must not take one from the client. This resolves the one from the other.
+ *
+ * Why link at all: a curator who signed in *with* a wallet has, by construction, proved
+ * they hold its key. Making them press "Connect wallet" afterwards to become tippable
+ * would be asking for the same proof twice. Signing in is the connection.
+ *
+ * Returns false when no profile row exists yet rather than throwing. The session is
+ * already created by the time this runs, so a failure here must not read as a failed
+ * sign-in — the user is signed in, just not yet tippable, and the connect-wallet flow in
+ * the app is the recovery path.
+ */
+export const linkExternalWalletByAuthSubject = internalMutation({
+  args: { authSubject: v.string(), publicKey: v.string(), network: v.string() },
+  handler: async (ctx, { authSubject, publicKey, network }): Promise<boolean> => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_authSubject", (q) => q.eq("authSubject", authSubject))
+      .unique();
+    if (!user) return false;
+
+    const existing = await ctx.db
+      .query("externalWallets")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        publicKey,
+        network: network.toUpperCase(),
+        linkedAt: Date.now(),
+      });
+      return true;
+    }
+
+    await ctx.db.insert("externalWallets", {
+      userId: user._id,
+      publicKey,
+      network: network.toUpperCase(),
+      linkedAt: Date.now(),
+    });
+    return true;
+  },
+});

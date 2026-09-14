@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { absoluteUrl, copyLink } from "@/lib/musea/clipboard";
 import { formatCount } from "@/lib/musea/format";
 import type { Artifact } from "@/lib/musea/types";
 import { ArtifactDetail } from "./artifact-detail";
@@ -69,6 +70,26 @@ export function GalleryDetailView({ galleryId }: { galleryId: Id<"galleries"> })
       />
     );
   }
+
+  /**
+   * Copy the link a *stranger* would use, which is the Community one — not this page.
+   *
+   * `/app/galleries/<id>` is the owner's view and resolves to "Gallery not found" for
+   * anyone else, so sharing it would hand out a link that is dead for its recipient while
+   * working perfectly for whoever copied it. The worst kind of broken.
+   *
+   * A private gallery still copies rather than refusing: wanting the link before flipping
+   * the switch is a reasonable order to do things in. The toast is what keeps it honest,
+   * because the link genuinely does not work for anyone else yet.
+   */
+  const copyGalleryLink = () =>
+    copyLink(
+      absoluteUrl(`/app/community/${galleryId}`),
+      "Link copied",
+      gallery.isPublic
+        ? "Anyone with the link can open this gallery."
+        : "This gallery is private — make it public before sharing.",
+    );
 
   const togglePublic = async () => {
     try {
@@ -133,6 +154,7 @@ export function GalleryDetailView({ galleryId }: { galleryId: Id<"galleries"> })
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem onSelect={() => setEditing(true)}>Edit gallery</DropdownMenuItem>
+                <DropdownMenuItem onSelect={copyGalleryLink}>Copy link</DropdownMenuItem>
                 <DropdownMenuItem onSelect={togglePublic}>
                   {gallery.isPublic ? "Make private" : "Make public"}
                 </DropdownMenuItem>

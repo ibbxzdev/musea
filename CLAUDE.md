@@ -162,6 +162,7 @@ carefully — "Done" and "Done, v1 custody" mean very different things.
 | Convex schema, auth guards, DB helpers, config validation | Done; codegen run, typechecks against a live dev deployment |
 | `contracts/tipjar/` | **Done. Redeployed for the XLM cutover** — the token is a constructor arg, so only the binding changed. 10/10 tests, clippy clean, deployed `CCZPKSRP…` bound to the native SAC `CDLZFC3S…`, sample tip `762d5d84…`, and a zero-trustline recipient proved at `d0eb9b53…`. The old USDC deployment `CAIH6NCC…` is retired |
 | `convex/auth.ts` + `auth.config.ts` Better Auth wiring | Done. Safari device pass outstanding |
+| Wallet sign-in (SEP-0010, `convex/model/walletAuth.ts`) | **Done on testnet.** Email/password is still the default and the only path on a phone; "Continue with Freighter" is additive and hides itself when there is no extension. Verified end to end against `zealous-stork-862`: session issued, replay and wrong-signer both 401, repeat sign-in resolves to the same user |
 | Musea app (artifacts, galleries, filing, profile) | Done and on a live dev deployment. Ported from the iOS repo; 34 backend tests, `convex-authz` clean |
 | `convex/stellar/crypto.ts`, `walletsNode.ts` provisioning | **Done, v1 custody — to be removed.** Keypair + Friendbot + encrypted secret. Superseded by Story 2.1 |
 | `convex/stellar/tipsNode.ts` | **Done, v1 custody — signing half to be replaced.** Build/simulate/assemble/submit survives; server-side signing does not |
@@ -199,6 +200,53 @@ the only remaining precondition on either side is that the account exists on the
 > — the removed steps are in the git history of `scripts/setup-testnet.sh`, and the
 > `NO_TRUSTLINE` code and its `Error(Contract, #13)` classifier were kept for exactly that
 > reason.
+
+---
+
+## Signing in with a wallet
+
+There are two ways into the app. Email and password is the default and works everywhere.
+"Continue with Freighter" proves you hold a Stellar key, using **SEP-0010** — the standard
+Stellar web-auth ceremony — and is wired in as a Better Auth plugin
+(`convex/model/walletAuth.ts`), with the cryptography in `convex/stellar/webAuthNode.ts`.
+
+**The challenge transaction has sequence number 0, and that is the security property.**
+Sequence 0 is never valid on the network, so what the user signs can never be submitted, by
+us or by anyone who intercepts it. Freighter still shows a transaction-approval popup —
+that is the only UI it has — so the copy around the button has to say that nothing moves.
+Never "fix" the sequence number.
+
+Four things about this are load-bearing:
+
+- **Identity comes from the `account` table, never from `externalWallets`.** A row in
+  `externalWallets` is written by `external.ts:linkWallet`, which takes an address from the
+  client and proves nothing about who holds its key. Adopting a user from that table would
+  let anyone claim a stranger's address and then collect their sign-ins. An `account` row
+  with `providerId: "stellar"` is only ever written after a signature has verified.
+- **The Convex Better Auth component's schema is fixed** — user, account, session,
+  verification, and some OAuth tables — and an app cannot add to it. This is why
+  better-auth's own `siwe` plugin cannot be used even as a base: it persists to a
+  `walletAddress` table that does not exist here, and separately rejects a 56-character
+  `G...` key against its 42-character `0x` pattern before its `verifyMessage` hook runs.
+- **Signing in links the wallet.** The proof is strictly stronger than what the
+  connect-wallet button asks for, so a curator who arrives this way is immediately
+  tippable. Connect-wallet remains the recovery path if the link fails.
+- **Rate limits are set explicitly in `auth.ts`.** Better Auth's strict 3-per-10s bucket is
+  matched by path prefix against `/sign-in` and `/sign-up`, which `/stellar/*` does not
+  match — so without the custom rule these session-minting endpoints would inherit the
+  loose 100-per-10s default. Storage is `"database"` because the default `"memory"` is a
+  per-isolate counter, which on Convex means almost no limit at all. Note that Better Auth
+  enables rate limiting **in production only**.
+
+A wallet-only user has no email, so one is synthesised as `<address>@wallet.invalid` —
+`.invalid` is reserved by RFC 2606 and can never resolve, so nothing can later try to
+deliver to it.
+
+> **Freighter is desktop-only, so this is not the iPhone path.** The button is hidden
+> entirely when no extension is present rather than rendered disabled. Email remains what
+> gets demonstrated on iPhone Safari until the passkey work in Story 2.1 lands — and a
+> passkey smart account is the version of "sign in with your wallet" the SOW actually
+> commits to.
 
 ---
 

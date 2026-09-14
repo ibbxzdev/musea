@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     "./convex/_generated/api": "./convex/_generated/api.js",
-    "./convex/_generated/dataModel": "./convex/_generated/dataModel.js"
+    "./convex/_generated/dataModel": "./convex/_generated/dataModel.js",
+    "./convex/model/walletAuth": "./convex/model/walletAuth.ts"
   },
   "scripts": {
     "dev": "convex dev",
@@ -22,7 +23,8 @@
     "@stellar/stellar-sdk": "^17.0.1",
     "better-auth": "1.6.31",
     "cheerio": "^1.1.2",
-    "convex": "^1.45.0"
+    "convex": "^1.45.0",
+    "zod": "4.6.1"
   },
   "devDependencies": {
     "@edge-runtime/vm": "^5.0.0",
