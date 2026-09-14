@@ -1,8 +1,5 @@
 import { Images } from "lucide-react";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
-
-const COVER_SIZES = "(min-width: 1024px) 20vw, (min-width: 640px) 30vw, 45vw";
 
 /**
  * A gallery's cover: up to three thumbnails in the same mosaic the native app uses —
@@ -16,7 +13,7 @@ export function GalleryCover({
   imageUrls,
   className,
 }: {
-  imageUrls: string[];
+  imageUrls: readonly string[];
   className?: string;
 }) {
   return (
@@ -29,7 +26,7 @@ export function GalleryCover({
 }
 
 /** Destructured rather than indexed so each branch hands `CoverTile` a defined src. */
-function CoverMosaic({ imageUrls }: { imageUrls: string[] }) {
+function CoverMosaic({ imageUrls }: { imageUrls: readonly string[] }) {
   const [first, second, third] = imageUrls;
 
   if (!first) {
@@ -65,8 +62,10 @@ function CoverMosaic({ imageUrls }: { imageUrls: string[] }) {
 function CoverTile({ src }: { src: string }) {
   return (
     <span className="relative block h-full flex-1 overflow-hidden bg-muted">
-      {/* Decorative: the gallery title beside it already names the thing. */}
-      <Image src={src} alt="" fill sizes={COVER_SIZES} className="object-cover" />
+      {/* Decorative: the gallery title beside it already names the thing. A plain <img>
+          for the same reason as the artifact tiles — see artifact-card.tsx. */}
+      {/* biome-ignore lint/performance/noImgElement: arbitrary remote hosts */}
+      <img src={src} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
     </span>
   );
 }

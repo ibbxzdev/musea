@@ -1,10 +1,10 @@
 "use client";
 
+import { api } from "@musea/backend/convex/_generated/api";
+import { useQuery } from "convex/react";
 import { ArrowUpRight, Bookmark, Play } from "lucide-react";
-import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { galleriesForArtifact, isOwnArtifact } from "@/lib/musea/fixtures";
 import { formatRelativeDate } from "@/lib/musea/format";
 import { isSourceDirectable, KIND_LABELS, SOURCE_LABELS } from "@/lib/musea/sources";
 import type { Artifact } from "@/lib/musea/types";
@@ -12,8 +12,8 @@ import { ResponsiveModal } from "./responsive-modal";
 import { SourceMark } from "./source-badge";
 
 /**
- * Everything Musea knows about one artifact: the media, the AI-written title and
- * summary, the tags it was filed under, where it came from and when it was saved.
+ * Everything Musea knows about one artifact: the media, the title and summary its source
+ * published, the tags it is filed under, where it came from and when it was saved.
  *
  * The native app splits this across a viewer and a "Show Description" sheet because a
  * phone screen cannot hold both. A scrolling sheet can, so it is one surface here.
@@ -21,9 +21,12 @@ import { SourceMark } from "./source-badge";
 export function ArtifactDetail({
   artifact,
   onOpenChange,
+  /** Off for someone else's gallery, where the filing list is not yours to see. */
+  showFilings = true,
 }: {
   artifact: Artifact | null;
   onOpenChange: (open: boolean) => void;
+  showFilings?: boolean;
 }) {
   return (
     <ResponsiveModal
@@ -37,13 +40,28 @@ export function ArtifactDetail({
       }
       hideHeader
     >
-      {artifact && <ArtifactDetailBody artifact={artifact} />}
+      {artifact && <ArtifactDetailBody artifact={artifact} showFilings={showFilings} />}
     </ResponsiveModal>
   );
 }
 
-function ArtifactDetailBody({ artifact }: { artifact: Artifact }) {
-  const galleries = galleriesForArtifact(artifact);
+function ArtifactDetailBody({
+  artifact,
+  showFilings,
+}: {
+  artifact: Artifact;
+  showFilings: boolean;
+}) {
+  /**
+   * Skipped entirely rather than fetched-and-hidden when the filings are not ours to
+   * show: the query throws for an artifact the caller does not own, and a rejected
+   * subscription would surface as an error toast behind the sheet.
+   */
+  const galleries = useQuery(
+    api.galleryArtifacts.listGalleriesForArtifact,
+    showFilings ? { artifactId: artifact._id } : "skip",
+  );
+
   const directable = isSourceDirectable(artifact.sourceType) && Boolean(artifact.source);
 
   return (
@@ -51,14 +69,14 @@ function ArtifactDetailBody({ artifact }: { artifact: Artifact }) {
       {artifact.imageUrl && (
         <div
           className="relative w-full overflow-hidden rounded-2xl bg-muted"
-          style={{ aspectRatio: artifact.aspectRatio ?? 1 }}
+          style={artifact.aspectRatio ? { aspectRatio: artifact.aspectRatio } : undefined}
         >
-          <Image
+          {/* biome-ignore lint/performance/noImgElement: arbitrary remote hosts — see artifact-card.tsx */}
+          <img
             src={artifact.imageUrl}
             alt={artifact.title}
-            fill
-            sizes="(min-width: 640px) 32rem, 100vw"
-            className="object-cover"
+            className="w-full object-cover"
+            decoding="async"
           />
           {artifact.kind === "video" && (
             <span className="absolute inset-0 flex items-center justify-center">
@@ -96,9 +114,16 @@ function ArtifactDetailBody({ artifact }: { artifact: Artifact }) {
           )}
         </Button>
         <span className="text-sm text-muted-foreground">
-          Saved {formatRelativeDate(artifact.savedAt)}
+          Saved {formatRelativeDate(artifact.createdAt)}
         </span>
       </div>
+
+      {artifact.authorName && (
+        <p className="mt-2 text-sm text-muted-foreground">
+          By {artifact.authorName}
+          {artifact.authorHandle && ` (@${artifact.authorHandle})`}
+        </p>
+      )}
 
       {artifact.description && (
         <p className="mt-4 text-[15px] leading-relaxed text-pretty text-muted-foreground">
@@ -116,38 +141,31 @@ function ArtifactDetailBody({ artifact }: { artifact: Artifact }) {
         </div>
       )}
 
-      <section className="mt-6 border-t pt-4">
-        {!isOwnArtifact(artifact) ? (
-          // Somebody else's save — it was never filed in a gallery of yours, so offering
-          // to copy it is the only honest thing this section can say.
-          <Button variant="secondary" className="h-11 w-full rounded-full">
-            <Bookmark aria-hidden className="size-4" />
-            Save to my library
-          </Button>
-        ) : (
-          <>
-            <h3 className="flex items-center gap-1.5 text-sm font-medium">
-              <Bookmark aria-hidden className="size-4 text-muted-foreground" />
-              In your galleries
-            </h3>
-            {galleries.length > 0 ? (
-              <ul className="mt-3 flex flex-wrap gap-2">
-                {galleries.map((gallery) => (
-                  <li key={gallery.id}>
-                    <Badge variant="outline" className="rounded-full px-3 py-1 font-normal">
-                      {gallery.title}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-sm text-muted-foreground">
-                Not filed yet. Musea will pick a gallery once enrichment finishes.
-              </p>
-            )}
-          </>
-        )}
-      </section>
+      {showFilings && (
+        <section className="mt-6 border-t pt-4">
+          <h3 className="flex items-center gap-1.5 text-sm font-medium">
+            <Bookmark aria-hidden className="size-4 text-muted-foreground" />
+            In your galleries
+          </h3>
+          {galleries === undefined ? (
+            <div className="mt-3 h-6 w-40 animate-pulse rounded-full bg-muted" />
+          ) : galleries.length > 0 ? (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {galleries.map((gallery) => (
+                <li key={gallery._id}>
+                  <Badge variant="outline" className="rounded-full px-3 py-1 font-normal">
+                    {gallery.title}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Not filed anywhere yet. Use “Add to gallery” on the card.
+            </p>
+          )}
+        </section>
+      )}
     </article>
   );
 }

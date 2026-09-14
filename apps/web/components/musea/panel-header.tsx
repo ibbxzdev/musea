@@ -1,42 +1,42 @@
-"use client";
-
 import { ChevronLeft } from "lucide-react";
+import Link from "next/link";
 import type * as React from "react";
+import type { Route } from "next";
 
 /**
- * The header of a drilled-into view.
+ * The header of a drilled-into page.
  *
- * A tab on iOS keeps its own navigation stack, so going into a gallery pushes a screen
- * inside that tab rather than replacing the whole shell. The back control is a chevron
- * plus the name of where it goes, which is the iOS convention — never the word "Back".
+ * The back control is a chevron plus the name of where it goes, which is the iOS
+ * convention — never the word "Back". It is a `<Link>` to that section rather than
+ * `router.back()`: this page has a URL of its own now, so someone can arrive at it from
+ * a link, and history-back would take them off the site.
  */
 export function PanelHeader({
+  backHref,
   backLabel,
-  onBack,
   title,
   subtitle,
   action,
 }: {
+  backHref: Route;
   backLabel: string;
-  onBack: () => void;
   title: string;
   subtitle?: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (
     <div className="mb-5">
-      <button
-        type="button"
-        onClick={onBack}
+      <Link
+        href={backHref}
         className="-ml-2 inline-flex h-11 items-center gap-0.5 pr-3 pl-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         <ChevronLeft aria-hidden className="size-5" />
         {backLabel}
-      </button>
+      </Link>
 
       <div className="mt-1 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-2xl font-bold tracking-tight text-balance">{title}</h2>
+          <h1 className="text-2xl font-bold tracking-tight text-balance">{title}</h1>
           {subtitle && <div className="mt-1 text-sm text-muted-foreground">{subtitle}</div>}
         </div>
         {action}

@@ -8,8 +8,8 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-export function formatRelativeDate(iso: string, now: number = Date.now()): string {
-  const elapsed = now - new Date(iso).getTime();
+export function formatRelativeDate(at: number | string, now: number = Date.now()): string {
+  const elapsed = now - (typeof at === "number" ? at : new Date(at).getTime());
 
   if (elapsed < HOUR) return "just now";
   if (elapsed < DAY) {

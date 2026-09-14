@@ -21,9 +21,11 @@
     "@musea/shared": "workspace:*",
     "@stellar/stellar-sdk": "^17.0.1",
     "better-auth": "1.6.31",
+    "cheerio": "^1.1.2",
     "convex": "^1.45.0"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@musea/eslint-config": "workspace:*",
     "@musea/typescript-config": "workspace:*",
     "@types/node": "^22.15.3",

@@ -1,5 +1,8 @@
 "use client";
 
+import { api } from "@musea/backend/convex/_generated/api";
+import type { Id } from "@musea/backend/convex/_generated/dataModel";
+import { useAction, useMutation } from "convex/react";
 import { ArrowLeft, ImagePlus, Loader2, NotebookPen, X } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
@@ -7,19 +10,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { ResponsiveModal } from "./responsive-modal";
 
-/** Long enough to read as "fetching", short enough not to feel broken. */
-const PREVIEW_DELAY_MS = 600;
 /** Matches the native app: a few keystrokes of prose, then it becomes a note. */
 const NOTE_DEBOUNCE_MS = 500;
 
 type AddMode = "idle" | "url" | "note" | "media";
 
-type LinkPreview = { host: string; title: string; description: string };
+type LinkPreview = {
+  title: string;
+  description?: string;
+  image?: string;
+  authorName?: string;
+};
 
-type PickedMedia = { objectUrl: string; name: string; isVideo: boolean };
+type PickedMedia = {
+  objectUrl: string;
+  name: string;
+  isVideo: boolean;
+  file: File;
+  /** Measured in the browser so the tile reserves the right box before it loads. */
+  aspectRatio?: number;
+};
 
 function looksLikeUrl(value: string) {
   return /^https?:\/\/.+\..+/i.test(value.trim());
@@ -30,27 +44,6 @@ function looksLikeUrlPrefix(value: string) {
   const trimmed = value.trim().toLowerCase();
   if (!trimmed) return false;
   return "https://".startsWith(trimmed) || "http://".startsWith(trimmed);
-}
-
-/**
- * Stands in for the `preview.getPreview` Convex action.
- *
- * The real one scrapes Open Graph tags server-side. This one reads the host out of the
- * URL so the preview card has something true in it, and is clearly labelled below as
- * not-yet-fetched rather than pretending to have loaded a page.
- */
-function synthesisePreview(url: string): LinkPreview {
-  let host = url;
-  try {
-    host = new URL(url).host.replace(/^www\./, "");
-  } catch {
-    // An unparseable string never reaches here — looksLikeUrl gates the call.
-  }
-  return {
-    host,
-    title: host,
-    description: "Musea will read this page and write a title, summary and tags for it.",
-  };
 }
 
 export function AddArtifactModal({
@@ -72,13 +65,30 @@ export function AddArtifactModal({
   );
 }
 
+/**
+ * The save sheet.
+ *
+ * One field that decides for itself what you are doing: a URL becomes a link preview, a
+ * sentence becomes a note, a picked file becomes an upload. That behaviour is the phone
+ * app's, and it is the reason there is no mode picker.
+ *
+ * The preview is `linkPreview.preview` — a real server-side oEmbed/Open Graph read, not
+ * the synthesised host-name stand-in the first web port used. What you see before saving
+ * is what gets saved.
+ */
 function AddArtifactForm({ onDone }: { onDone: () => void }) {
+  const fetchPreview = useAction(api.linkPreview.preview);
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl);
+  const claimUpload = useMutation(api.files.claimUpload);
+  const createArtifact = useMutation(api.artifacts.create);
+
   const [input, setInput] = React.useState("");
   const [noteTitle, setNoteTitle] = React.useState("");
   const [noteBody, setNoteBody] = React.useState("");
   const [noteActive, setNoteActive] = React.useState(false);
   const [media, setMedia] = React.useState<PickedMedia | null>(null);
   const [preview, setPreview] = React.useState<LinkPreview | null>(null);
+  const [previewError, setPreviewError] = React.useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
@@ -106,23 +116,41 @@ function AddArtifactForm({ onDone }: { onDone: () => void }) {
     return () => clearTimeout(timer);
   }, [input]);
 
-  // Debounced "fetch" of the link preview.
+  const debouncedUrl = useDebouncedValue(input.trim(), 450);
+
+  // Fetch the preview once typing settles. An action per keystroke would be an outbound
+  // HTTP request to the pasted site per keystroke.
   React.useEffect(() => {
-    const trimmed = input.trim();
-    if (!looksLikeUrl(trimmed)) {
+    if (!looksLikeUrl(debouncedUrl)) {
       setPreview(null);
+      setPreviewError(null);
       setLoadingPreview(false);
       return;
     }
 
+    let cancelled = false;
     setLoadingPreview(true);
-    const timer = setTimeout(() => {
-      setPreview(synthesisePreview(trimmed));
-      setLoadingPreview(false);
-    }, PREVIEW_DELAY_MS);
+    setPreviewError(null);
 
-    return () => clearTimeout(timer);
-  }, [input]);
+    fetchPreview({ url: debouncedUrl })
+      .then((metadata) => {
+        if (cancelled) return;
+        setPreview(metadata);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPreview(null);
+        // Not a failure to save: the artifact is kept either way, it just arrives bare.
+        setPreviewError("Could not read that page. It will still be saved.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPreview(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedUrl, fetchPreview]);
 
   // Object URLs are held by the browser until they are revoked, so tie one to the pick
   // that created it and let it go as soon as that pick is replaced or the sheet closes.
@@ -138,6 +166,7 @@ function AddArtifactForm({ onDone }: { onDone: () => void }) {
     setNoteActive(false);
     setMedia(null);
     setPreview(null);
+    setPreviewError(null);
   };
 
   const handlePickMedia = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -148,11 +177,20 @@ function AddArtifactForm({ onDone }: { onDone: () => void }) {
     if (!file) return;
 
     setInput("");
-    setMedia({
-      objectUrl: URL.createObjectURL(file),
-      name: file.name,
-      isVideo: file.type.startsWith("video/"),
-    });
+    const objectUrl = URL.createObjectURL(file);
+    const isVideo = file.type.startsWith("video/");
+    setMedia({ objectUrl, name: file.name, isVideo, file });
+
+    if (!isVideo) {
+      const image = new Image();
+      image.onload = () =>
+        setMedia((previous) =>
+          previous?.objectUrl === objectUrl
+            ? { ...previous, aspectRatio: image.width / image.height }
+            : previous,
+        );
+      image.src = objectUrl;
+    }
   };
 
   const canSave =
@@ -160,16 +198,53 @@ function AddArtifactForm({ onDone }: { onDone: () => void }) {
     (mode === "note" && (noteBody.trim().length > 0 || noteTitle.trim().length > 0)) ||
     (mode === "url" && input.trim().length > 0);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!canSave || saving) return;
     setSaving(true);
-    // Story 3.x replaces this with the `artifacts.createArtifact` mutation. Until then it
-    // is honest about being a mock rather than quietly pretending to have saved.
-    setTimeout(() => {
-      setSaving(false);
+
+    try {
+      if (mode === "media" && media) {
+        // Upload first, then create: an artifact pointing at a storage id that failed to
+        // upload would render as a permanently broken tile.
+        const uploadUrl = await generateUploadUrl({});
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": media.file.type },
+          body: media.file,
+        });
+        if (!response.ok) throw new Error("upload failed");
+
+        const { storageId } = (await response.json()) as { storageId: Id<"_storage"> };
+
+        // Claim it before attaching it. Convex storage records no uploader, so this is
+        // the step that makes the id mean "mine" — `artifacts.create` refuses a storage
+        // id the caller has not claimed.
+        await claimUpload({ storageId });
+
+        await createArtifact({
+          title: media.name,
+          imageStorageId: storageId,
+          aspectRatio: media.aspectRatio,
+          origin: "files",
+        });
+      } else if (mode === "note") {
+        await createArtifact({
+          title: noteTitle.trim() || undefined,
+          description: noteBody.trim() || undefined,
+          origin: "note",
+        });
+      } else {
+        await createArtifact({ sourceUrl: input.trim() });
+      }
+
       reset();
       onDone();
-      toast.success("Saved to Musea", { description: "Not yet persisted — UI preview only." });
-    }, 400);
+      toast.success("Saved to Musea");
+    } catch {
+      toast.error("Could not save that.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -182,7 +257,9 @@ function AddArtifactForm({ onDone }: { onDone: () => void }) {
           />
         )}
 
-        {mode === "url" && <UrlPreviewCard loading={loadingPreview} preview={preview} />}
+        {mode === "url" && (
+          <UrlPreviewCard loading={loadingPreview} preview={preview} error={previewError} />
+        )}
 
         {mode === "note" && (
           <NoteEditor
@@ -254,10 +331,18 @@ function QuickAction({
   );
 }
 
-function UrlPreviewCard({ loading, preview }: { loading: boolean; preview: LinkPreview | null }) {
+function UrlPreviewCard({
+  loading,
+  preview,
+  error,
+}: {
+  loading: boolean;
+  preview: LinkPreview | null;
+  error: string | null;
+}) {
   if (loading) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-2" aria-busy="true">
         <div className="h-32 w-full animate-pulse rounded-2xl bg-muted" />
         <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
         <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
@@ -265,15 +350,36 @@ function UrlPreviewCard({ loading, preview }: { loading: boolean; preview: LinkP
     );
   }
 
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-dashed p-4">
+        <p className="text-sm text-muted-foreground text-pretty">{error}</p>
+      </div>
+    );
+  }
+
   if (!preview) return null;
 
   return (
-    <div className="rounded-2xl border p-4">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {preview.host}
-      </p>
-      <p className="mt-1 text-base font-semibold tracking-tight">{preview.title}</p>
-      <p className="mt-1 text-sm text-muted-foreground">{preview.description}</p>
+    <div className="overflow-hidden rounded-2xl border">
+      {preview.image && (
+        // biome-ignore lint/performance/noImgElement: arbitrary remote host, see artifact-card.tsx
+        <img
+          src={preview.image}
+          alt=""
+          className="max-h-56 w-full bg-muted object-cover"
+          decoding="async"
+        />
+      )}
+      <div className="p-4">
+        <p className="text-base font-semibold tracking-tight text-pretty">{preview.title}</p>
+        {preview.authorName && (
+          <p className="mt-0.5 text-xs text-muted-foreground">By {preview.authorName}</p>
+        )}
+        {preview.description && (
+          <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{preview.description}</p>
+        )}
+      </div>
     </div>
   );
 }

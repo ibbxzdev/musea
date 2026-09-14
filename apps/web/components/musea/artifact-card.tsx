@@ -1,7 +1,6 @@
 "use client";
 
 import { Loader2, MoreHorizontal, Play, TriangleAlert } from "lucide-react";
-import Image from "next/image";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,28 +8,44 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { isOwnArtifact } from "@/lib/musea/fixtures";
 import type { Artifact } from "@/lib/musea/types";
 import { cn } from "@/lib/utils";
 import { SourceMark } from "./source-badge";
-
-/** Widths the grid actually renders a tile at, so the browser fetches the right one. */
-const THUMB_SIZES = "(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw";
 
 /**
  * Sources whose mark is worth showing on the tile.
  *
  * A picture you took yourself or dragged in from Files came from nowhere in particular —
- * marking those adds a chip to nearly every tile and stops the chip meaning anything.
+ * marking those puts a chip on nearly every tile and stops the chip meaning anything.
  */
-const MARKED_SOURCES = new Set(["pinterest", "x", "youtube", "reddit", "tiktok", "instagram"]);
+const MARKED_SOURCES = new Set<Artifact["sourceType"]>([
+  "pinterest",
+  "x",
+  "youtube",
+  "reddit",
+  "tiktok",
+  "instagram",
+]);
+
+export type ArtifactCardActions = {
+  onAddToGallery?: (artifact: Artifact) => void;
+  onDelete?: (artifact: Artifact) => void;
+  /**
+   * What the destructive item says. It is "Delete artifact" in the library and "Remove
+   * from gallery" inside one, because those are genuinely different acts — un-filing a
+   * save must not read as though it will destroy it.
+   */
+  deleteLabel?: string;
+};
 
 export function ArtifactCard({
   artifact,
   onOpen,
+  actions,
 }: {
   artifact: Artifact;
   onOpen: (artifact: Artifact) => void;
+  actions?: ArtifactCardActions;
 }) {
   const isNote = artifact.kind === "note";
 
@@ -41,17 +56,27 @@ export function ArtifactCard({
         onClick={() => onOpen(artifact)}
         className="block w-full overflow-hidden rounded-2xl bg-muted text-left transition-[transform,opacity] duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none active:scale-[0.985]"
       >
-        {isNote ? <NoteTile artifact={artifact} /> : <MediaTile artifact={artifact} />}
+        {isNote || !artifact.imageUrl ? (
+          <NoteTile artifact={artifact} />
+        ) : (
+          <MediaTile artifact={artifact} />
+        )}
         <span className="sr-only">Open {artifact.title}</span>
       </button>
 
-      <ArtifactMenu artifact={artifact} />
+      {(actions?.onAddToGallery || actions?.onDelete) && (
+        <ArtifactMenu artifact={artifact} actions={actions} />
+      )}
     </div>
   );
 }
 
 /**
- * A note has no picture, so the type is the picture.
+ * A tile with no picture, so the type is the picture.
+ *
+ * Also the fallback for a link whose page published no `og:image`, and for one still
+ * being scraped — both of which are common enough that a grey box would be the most
+ * frequent thing in the grid.
  *
  * Spans throughout, not divs and paragraphs: the whole tile lives inside a `<button>`,
  * whose content model is phrasing content only.
@@ -65,6 +90,7 @@ function NoteTile({ artifact }: { artifact: Artifact }) {
           {artifact.description}
         </span>
       )}
+      <StatusChip status={artifact.status} className="mt-auto self-start" />
     </span>
   );
 }
@@ -76,19 +102,31 @@ function MediaTile({ artifact }: { artifact: Artifact }) {
   return (
     <span
       className="relative block w-full"
-      // Set from the fixture rather than measured on load, so the column reserves the
-      // right height before the image arrives and the grid never jumps.
-      style={{ aspectRatio: artifact.aspectRatio ?? 1 }}
+      /**
+       * Set from the artifact when we know it — an upload is measured in the browser at
+       * pick time — so the column reserves the right height before the picture arrives
+       * and the grid never jumps. A scraped `og:image` has no declared size, so those
+       * tiles take their height from the image itself once it loads.
+       */
+      style={artifact.aspectRatio ? { aspectRatio: artifact.aspectRatio } : undefined}
     >
-      {artifact.imageUrl && (
-        <Image
-          src={artifact.imageUrl}
-          alt={artifact.title}
-          fill
-          sizes={THUMB_SIZES}
-          className="object-cover"
-        />
-      )}
+      {/*
+        A plain <img>, not next/image. These are third-party thumbnails from whatever host
+        the user saved from, so using the optimiser would mean allowing every remote host
+        in next.config — which turns the deployment into an open image proxy anyone can
+        point at anything. Not worth it for a grid of thumbnails.
+      */}
+      {/* biome-ignore lint/performance/noImgElement: arbitrary remote hosts, see above */}
+      <img
+        src={artifact.imageUrl}
+        alt={artifact.title}
+        loading="lazy"
+        decoding="async"
+        className={cn(
+          "w-full object-cover",
+          artifact.aspectRatio ? "absolute inset-0 h-full" : "h-auto",
+        )}
+      />
 
       {artifact.kind === "video" && (
         <span className="absolute inset-0 flex items-center justify-center">
@@ -128,19 +166,24 @@ function MediaTile({ artifact }: { artifact: Artifact }) {
   );
 }
 
-function StatusChip({ status }: { status: Artifact["status"] }) {
+function StatusChip({ status, className }: { status: Artifact["status"]; className?: string }) {
   if (status === "ready") return null;
 
   const pending = status === "pending";
 
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-background/85 px-2.5 py-1 text-[11px] font-medium text-foreground backdrop-blur-sm">
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full bg-background/85 px-2.5 py-1 text-[11px] font-medium text-foreground backdrop-blur-sm",
+        className,
+      )}
+    >
       {pending ? (
         <Loader2 aria-hidden className="size-3 animate-spin" />
       ) : (
         <TriangleAlert aria-hidden className="size-3 text-amber-500" />
       )}
-      {pending ? "Organizing…" : "Could not process"}
+      {pending ? "Reading the page…" : "Could not read that link"}
     </span>
   );
 }
@@ -152,7 +195,7 @@ function StatusChip({ status }: { status: Artifact["status"] }) {
  * does not sit on top of every tile in the grid. On touch there is no hover, so it stays
  * visible — `group-hover` alone would make it unreachable on a phone.
  */
-function ArtifactMenu({ artifact }: { artifact: Artifact }) {
+function ArtifactMenu({ artifact, actions }: { artifact: Artifact; actions: ArtifactCardActions }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -167,18 +210,24 @@ function ArtifactMenu({ artifact }: { artifact: Artifact }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        {isOwnArtifact(artifact) ? (
+        {actions.onAddToGallery && (
+          <DropdownMenuItem onSelect={() => actions.onAddToGallery?.(artifact)}>
+            Add to gallery
+          </DropdownMenuItem>
+        )}
+        {artifact.source && (
+          <DropdownMenuItem asChild>
+            <a href={artifact.source} target="_blank" rel="noreferrer noopener">
+              Open original
+            </a>
+          </DropdownMenuItem>
+        )}
+        {actions.onDelete && (
           <>
-            <DropdownMenuItem>Add to gallery</DropdownMenuItem>
-            <DropdownMenuItem>Share</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive">Delete artifact</DropdownMenuItem>
-          </>
-        ) : (
-          // Somebody else's save: you can take a copy, not manage theirs.
-          <>
-            <DropdownMenuItem>Save to my library</DropdownMenuItem>
-            <DropdownMenuItem>Share</DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onSelect={() => actions.onDelete?.(artifact)}>
+              {actions.deleteLabel ?? "Delete artifact"}
+            </DropdownMenuItem>
           </>
         )}
       </DropdownMenuContent>

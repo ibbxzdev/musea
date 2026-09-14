@@ -13,8 +13,28 @@ import { authClient } from "@/lib/auth-client";
  * convex/model/auth.ts rejects — usually presenting as "Not signed in" while the UI
  * clearly shows a signed-in user.
  *
- * `expectAuth` makes Convex hold queries until the token is known rather than firing an
- * unauthenticated request first, which otherwise causes a visible flash of signed-out UI.
+ * ── Why `expectAuth` is NOT set ───────────────────────────────────────────────────────
+ * It used to be, to stop a signed-in user seeing a flash of signed-out UI while the token
+ * resolved. It cannot be used in this app, and the failure mode is total rather than
+ * cosmetic:
+ *
+ * `expectAuth: true` pauses the websocket in the ConvexReactClient constructor, and the
+ * only thing that resumes it is the end of the auth manager's `setConfig()` — which runs
+ * only when `client.setAuth()` is called. `ConvexProviderWithAuth` calls `setAuth()` only
+ * when the auth provider already reports an authenticated user; for a signed-out visitor
+ * it calls neither, so the socket stays paused forever and *every* query — public ones
+ * included — hangs at `undefined`. That is indistinguishable from a slow network, so it
+ * presents as a page of loading skeletons that never resolve.
+ *
+ * That is fine for an app where every page requires a session. This one has public pages
+ * (`/app/community`) and a sign-in prompt that only renders once we know the visitor is
+ * signed out, so it is not that app.
+ *
+ * The flash it was guarding against is handled properly instead, in
+ * `components/musea/require-auth.tsx`: gate on `useConvexAuth()`, whose `isLoading` comes
+ * from the auth provider rather than from a query, so "still checking" and "definitely
+ * signed out" stay distinguishable without pausing anything.
+ * ──────────────────────────────────────────────────────────────────────────────────────
  */
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -26,22 +46,26 @@ if (!convexUrl) {
   );
 }
 
-const convex = new ConvexReactClient(convexUrl, { expectAuth: true });
+const convex = new ConvexReactClient(convexUrl);
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    // KNOWN TYPE GAP (Story 0.3) — this cast is papering over a real error, not a cosmetic one.
+    // This cast is upstream's problem, and it is narrower than an earlier note here claimed.
     //
-    // `ConvexBetterAuthProvider` expects an `AuthClient` whose `useSession().data` is
-    // inferred from the SERVER auth config. Our `createAuthClient` call in
-    // lib/auth-client.ts has no server type to infer from, so its session type resolves to
-    // `never` and the two are structurally incompatible.
+    // `AuthClient` in @convex-dev/better-auth@0.12.5 is declared as
+    // `ReturnType<typeof createAuthClient<BetterAuthClientPlugin & { plugins: Plugins }>>`.
+    // Passing a plugin type where an options object belongs collapses the session
+    // inference, so the declared prop type resolves to `useSession().data: never` — which
+    // no real client can satisfy, because `null` is not assignable to `never`. Our client
+    // is strictly *more* specific than the prop demands, not less.
     //
-    // The fix is to make the client generic over the server config (roughly
-    // `createAuthClient<typeof createAuth>(...)`, exact form per
-    // https://labs.convex.dev/better-auth) — NOT to keep this cast. Until that is done,
-    // `useSession()` gives no useful types anywhere in the app, so do not build session-
-    // dependent UI on top of it and assume the types are protecting you.
+    // So this is not the "client isn't generic over the server config" problem the previous
+    // comment guessed at; making the client generic does not fix it. Re-check on the next
+    // component bump and drop the cast the moment `AuthClient` stops resolving to `never`.
+    //
+    // It also does NOT leave session types unusable elsewhere: `authClient.useSession()`
+    // imported straight from `@/lib/auth-client` is fully typed (user id, email, name,
+    // image, session). Only this one prop boundary needs coercing.
     <ConvexBetterAuthProvider client={convex} authClient={authClient as unknown as AuthClient}>
       {children}
     </ConvexBetterAuthProvider>

@@ -1,18 +1,11 @@
-import type { Metadata } from "next";
-import { MuseaApp } from "@/components/musea/musea-app";
-
-export const metadata: Metadata = {
-  title: "Musea",
-  description: "Your artifacts, galleries and the community — a visual library for what you keep.",
-};
+import { redirect } from "next/navigation";
 
 /**
- * The Musea browse UI, ported from the iOS app.
+ * `/app` is not a screen, it is the way in.
  *
- * Presentation only: everything renders from `lib/musea/fixtures.ts`, nothing talks to
- * Convex, and no tipping affordance appears here. The scaffold's build-status page at
- * `/` is left alone deliberately — see the note at the top of `app/page.tsx`.
+ * Artifacts is the landing section because it is the one that always has something in it
+ * once you have saved anything at all.
  */
-export default function MuseaPage() {
-  return <MuseaApp />;
+export default function MuseaIndex() {
+  redirect("/app/artifacts");
 }

@@ -8,14 +8,23 @@
  * @module
  */
 
+import type * as artifacts from "../artifacts.js";
 import type * as auth from "../auth.js";
+import type * as files from "../files.js";
 import type * as galleries from "../galleries.js";
+import type * as galleryArtifacts from "../galleryArtifacts.js";
+import type * as http from "../http.js";
+import type * as linkPreview from "../linkPreview.js";
+import type * as model_artifacts from "../model/artifacts.js";
 import type * as model_auth from "../model/auth.js";
+import type * as seed from "../seed.js";
 import type * as stellar_config from "../stellar/config.js";
-import type * as stellar_crypto from "../stellar/crypto.js";
+import type * as stellar_external from "../stellar/external.js";
+import type * as stellar_externalNode from "../stellar/externalNode.js";
 import type * as stellar_internal from "../stellar/internal.js";
 import type * as stellar_tips from "../stellar/tips.js";
-import type * as stellar_wallets from "../stellar/wallets.js";
+import type * as stellar_tipsNode from "../stellar/tipsNode.js";
+import type * as tips from "../tips.js";
 import type * as users from "../users.js";
 
 import type {
@@ -25,14 +34,23 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  artifacts: typeof artifacts;
   auth: typeof auth;
+  files: typeof files;
   galleries: typeof galleries;
+  galleryArtifacts: typeof galleryArtifacts;
+  http: typeof http;
+  linkPreview: typeof linkPreview;
+  "model/artifacts": typeof model_artifacts;
   "model/auth": typeof model_auth;
+  seed: typeof seed;
   "stellar/config": typeof stellar_config;
-  "stellar/crypto": typeof stellar_crypto;
+  "stellar/external": typeof stellar_external;
+  "stellar/externalNode": typeof stellar_externalNode;
   "stellar/internal": typeof stellar_internal;
   "stellar/tips": typeof stellar_tips;
-  "stellar/wallets": typeof stellar_wallets;
+  "stellar/tipsNode": typeof stellar_tipsNode;
+  tips: typeof tips;
   users: typeof users;
 }>;
 

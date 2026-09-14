@@ -6,13 +6,17 @@ const nextConfig: NextConfig = {
 
   typedRoutes: true,
 
-  images: {
-    /**
-     * Placeholder thumbnails for the Musea browse UI fixtures. Real saves will be served
-     * from Convex file storage, at which point this entry goes away rather than growing.
-     */
-    remotePatterns: [{ protocol: "https", hostname: "picsum.photos" }],
-  },
+  /**
+   * No `images.remotePatterns`, and no `next/image` on artifact thumbnails.
+   *
+   * A saved artifact's thumbnail is an `og:image` on whatever host the user saved from,
+   * so there is no list of hosts to allow — the honest entry would be `hostname: "**"`,
+   * and that turns `/_next/image` into an open image proxy: anyone can make this
+   * deployment fetch and cache any URL on the internet, on our bandwidth.
+   *
+   * So artifact media renders through a plain `<img loading="lazy">` (see
+   * `components/musea/artifact-card.tsx`). Local static assets still use `next/image`.
+   */
 
   /**
    * Keeping Stellar out of the browser bundle.

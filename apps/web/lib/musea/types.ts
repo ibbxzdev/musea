@@ -1,79 +1,42 @@
+import type { api } from "@musea/backend/convex/_generated/api";
+import type { FunctionReturnType } from "convex/server";
+
 /**
- * Shapes for the Musea browse UI.
+ * Shapes for the Musea UI, derived from the Convex functions that produce them.
  *
- * These mirror the `artificats` / `gallery` tables in the Musea app, trimmed to what the
- * web UI actually renders. They are deliberately decoupled from `convex/schema.ts` here:
- * this is the presentation contract, and Story 3.x maps real documents onto it.
+ * Nothing here is hand-written. These used to be a parallel set of interfaces kept in
+ * step with the backend by hand, which is a contract that holds right up until someone
+ * renames a field — and then fails at runtime rather than at `tsc`. Reading them off the
+ * function signatures means a backend change that breaks a card breaks the build.
+ *
+ * The backend already returns projections rather than raw documents (see
+ * `convex/model/artifacts.ts`), so these are the presentation contract too: no
+ * `searchText`, no `userId`, no storage ids.
  */
 
+/** One save. `_id`, not `id` — these are Convex documents. */
+export type Artifact = FunctionReturnType<typeof api.artifacts.search>[number];
+
+/** A gallery as it appears in a grid: cover mosaic, save count, curator. */
+export type GalleryCard = FunctionReturnType<typeof api.galleries.listMine>[number];
+
+/** A gallery's own page. `null` when it is private and you are not its owner. */
+export type GalleryDetail = NonNullable<FunctionReturnType<typeof api.galleries.get>>;
+
+/** The signed-in curator. */
+export type Viewer = NonNullable<FunctionReturnType<typeof api.users.viewer>>;
+
+/** The three counts on the profile page. */
+export type ViewerStats = FunctionReturnType<typeof api.users.stats>;
+
 /** Where an artifact came from. Decided once at save time, never re-derived at render. */
-export type SourceType =
-  | "pinterest"
-  | "x"
-  | "youtube"
-  | "reddit"
-  | "tiktok"
-  | "instagram"
-  | "gallery"
-  | "files"
-  | "link"
-  | "note";
+export type SourceType = Artifact["sourceType"];
 
 /** What an artifact *is*, which decides how its card renders. */
-export type ArtifactKind = "image" | "video" | "note" | "link";
+export type ArtifactKind = Artifact["kind"];
 
 /** Enrichment state. `pending` and `failed` get a badge on the card. */
-export type ArtifactStatus = "pending" | "ready" | "failed";
+export type ArtifactStatus = Artifact["status"];
 
-export type Artifact = {
-  id: string;
-  kind: ArtifactKind;
-  title: string;
-  description?: string;
-  tags: string[];
-  /** Thumbnail. Absent on notes, which render as type. */
-  imageUrl?: string;
-  /**
-   * width ÷ height of the thumbnail. Set on every image so the masonry column reserves
-   * the right box before the image loads — no reflow, no cumulative layout shift.
-   */
-  aspectRatio?: number;
-  /** Original URL, when there is one to go back to. */
-  source?: string;
-  sourceType: SourceType;
-  /** ISO date. Rendered relatively — see formatRelativeDate. */
-  savedAt: string;
-  galleryIds: string[];
-  status: ArtifactStatus;
-};
-
-export type Gallery = {
-  id: string;
-  title: string;
-  description?: string;
-  /** Galleries the auto-filer created get a sparkle badge until they're claimed. */
-  isAuto: boolean;
-  artifactIds: string[];
-};
-
-export type Curator = {
-  name: string;
-  handle: string;
-  /** Falls back to initials when absent. */
-  avatarUrl?: string;
-};
-
-export type CommunityGallery = {
-  id: string;
-  title: string;
-  description?: string;
-  curator: Curator;
-  /** Total saves in the gallery. More than the handful the browse view renders. */
-  saveCount: number;
-  followerCount: number;
-};
-
-export type Profile = Curator & {
-  bio?: string;
-  joinedAt: string;
-};
+/** A curator, reduced to what a visitor is allowed to see. */
+export type Curator = NonNullable<GalleryCard["owner"]>;
