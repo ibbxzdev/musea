@@ -15,24 +15,26 @@ import { Label } from "@/components/ui/label";
 /**
  * Whether the email and password form is offered.
  *
- * **Off for now, at the project owner's direction — wallet sign-in only.** Nothing was
- * deleted to do this: the form, its handler and its state all still compile and are still
- * type-checked, and `emailAndPassword` stays enabled in
- * `packages/backend/convex/auth.ts`. Existing email accounts still work, and this comes
- * back by flipping one boolean. That is the point of a flag rather than commented-out JSX,
- * which rots quietly and takes its `submit` handler and four pieces of state with it.
+ * **On. It is the only way into the app on a phone.** Freighter is a desktop extension
+ * with no iOS build, so with this off iPhone Safari — the device CLAUDE.md names as the
+ * verification target — has no path in at all. It was briefly off at the project owner's
+ * direction; turning it back on also restores SOW §4.2a's ordering, which says Freighter
+ * must stay additive rather than become the primary path.
  *
- * **Know what this costs: there is now no way to sign in on a phone.** Freighter is a
- * desktop extension with no iOS build, so hiding email leaves iPhone Safari — the device
- * CLAUDE.md names as the verification target — with no path in at all. It also makes
- * Freighter the primary path, which SOW §4.2a says it must not become. Both are temporary
- * and both are resolved by the passkey work in Story 2.1, which is the sign-in that is
- * meant to work on a phone.
+ * **The passkey work will not replace this.** It is worth being precise, because the
+ * earlier note here assumed otherwise: the passkey in Deliverable 2 authorizes *tips* —
+ * it signs the Soroban auth payload — and is not an authentication method. Nothing in
+ * Epic 2B gives a phone user a way to sign in, so email has to stay until something
+ * deliberately replaces it.
  *
- * Annotated `: boolean` deliberately. Without it TypeScript infers the literal type
- * `false`, and every branch below reads as statically dead.
+ * Kept as a flag rather than unconditional JSX so the two paths stay independently
+ * switchable; `emailAndPassword` is enabled in `packages/backend/convex/auth.ts`
+ * regardless, so flipping this needs no backend change.
+ *
+ * Annotated `: boolean` deliberately. Without it TypeScript infers the literal type, and
+ * every branch guarded on the other value reads as statically dead.
  */
-const EMAIL_SIGN_IN_ENABLED: boolean = false;
+const EMAIL_SIGN_IN_ENABLED: boolean = true;
 
 /**
  * The way in. Currently a Stellar wallet, with email and password behind the flag above.
@@ -235,8 +237,8 @@ export default function SignInPage() {
 
       {/*
         Errors live out here rather than inside the form, because both paths set them and
-        only one of the two is currently rendered. Inside the form, a wallet failure would
-        have nowhere to appear at all.
+        either one can be the only path rendered. Inside the form, a wallet failure would
+        have nowhere to appear on a phone, where the form is all there is.
       */}
       {error && <p className="text-sm text-destructive">{error}</p>}
 
