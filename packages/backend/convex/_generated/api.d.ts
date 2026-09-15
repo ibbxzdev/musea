@@ -19,6 +19,7 @@ import type * as model_artifacts from "../model/artifacts.js";
 import type * as model_auth from "../model/auth.js";
 import type * as seed from "../seed.js";
 import type * as stellar_config from "../stellar/config.js";
+import type * as stellar_diagnostics from "../stellar/diagnostics.js";
 import type * as stellar_internal from "../stellar/internal.js";
 import type * as stellar_passkey from "../stellar/passkey.js";
 import type * as stellar_passkeyNode from "../stellar/passkeyNode.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   "model/auth": typeof model_auth;
   seed: typeof seed;
   "stellar/config": typeof stellar_config;
+  "stellar/diagnostics": typeof stellar_diagnostics;
   "stellar/internal": typeof stellar_internal;
   "stellar/passkey": typeof stellar_passkey;
   "stellar/passkeyNode": typeof stellar_passkeyNode;

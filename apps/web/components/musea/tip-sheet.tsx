@@ -12,9 +12,11 @@ import Link from "next/link";
 import * as React from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { logError } from "@/lib/musea/debug";
 import { PasskeyError, passkeysSupported, signWithPasskey } from "@/lib/musea/passkey";
 import { STELLAR_NETWORK } from "@/lib/musea/stellar";
 import { cn } from "@/lib/utils";
+import { ErrorDetail } from "./error-detail";
 import { ResponsiveModal } from "./responsive-modal";
 
 /**
@@ -106,6 +108,8 @@ export function TipButton({
     rpId: string;
   } | null>(null);
   const [prepareError, setPrepareError] = React.useState<string | null>(null);
+  /** Temporary: the raw last failure, rendered in the sheet for the device pass. */
+  const [detail, setDetail] = React.useState<string | null>(null);
 
   const selected = PRESETS.find((preset) => preset.amount === amount) ?? PRESETS[0]!;
 
@@ -146,6 +150,7 @@ export function TipButton({
     let cancelled = false;
     setPrepared(null);
     setPrepareError(null);
+    setDetail(null);
     prepareTip({ galleryId, amount: selected.amount })
       .then((result) => {
         if (cancelled) {
@@ -157,7 +162,11 @@ export function TipButton({
         setPrepared(result);
       })
       .catch((error) => {
-        if (!cancelled) setPrepareError(tipErrorMessage(error));
+        const described = logError("prepareTip", error);
+        if (!cancelled) {
+          setPrepareError(tipErrorMessage(error));
+          setDetail(described);
+        }
       });
 
     return () => {
@@ -171,6 +180,7 @@ export function TipButton({
     setSending(true);
 
     const toastId = toast.loading("Confirm with Face ID…");
+    setDetail(null);
 
     try {
       // Synchronous inside the tap handler — the challenge is already here.
@@ -213,9 +223,11 @@ export function TipButton({
 
       // Dismissing Face ID is a decision, not a failure: stay on the sheet, on the amount
       // they picked, so changing their mind again is one tap.
+      const described = logError("submitTip", error);
       if (error instanceof PasskeyError && error.code === "SIGNATURE_REJECTED") {
         toast.dismiss(toastId);
       } else {
+        setDetail(described);
         toast.error(tipErrorMessage(error), { id: toastId });
       }
     } finally {
@@ -309,6 +321,8 @@ export function TipButton({
           {prepareError && !blocker ? (
             <p className="mt-2 text-sm text-destructive">{prepareError}</p>
           ) : null}
+
+          <ErrorDetail detail={detail} />
 
           <Button
             onClick={handleConfirm}

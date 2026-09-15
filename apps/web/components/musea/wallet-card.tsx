@@ -10,6 +10,8 @@ import { ExternalLink, Fingerprint, RefreshCw, ShieldCheck, TriangleAlert } from
 import * as React from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ErrorDetail } from "./error-detail";
+import { logError } from "@/lib/musea/debug";
 import { createPasskey, PasskeyError, passkeysSupported } from "@/lib/musea/passkey";
 import { STELLAR_NETWORK } from "@/lib/musea/stellar";
 
@@ -35,6 +37,8 @@ export function WalletCard() {
   const [creating, setCreating] = React.useState(false);
   const [balance, setBalance] = React.useState<string | null>(null);
   const [refreshing, setRefreshing] = React.useState(false);
+  /** Temporary: the raw last failure, rendered on the card for the device pass. */
+  const [detail, setDetail] = React.useState<string | null>(null);
 
   const supported = React.useMemo(() => passkeysSupported(), []);
   const needsWallet = wallet === null || wallet?.status === "failed";
@@ -45,7 +49,12 @@ export function WalletCard() {
     if (!supported) return;
     startRegistration({})
       .then(setOptions)
-      .catch(() => setOptions(null));
+      .catch((error) => {
+        // Was silent, which made a failing prefetch indistinguishable from a slow one:
+        // the button just kept saying "Still getting ready".
+        setOptions(null);
+        setDetail(logError("startRegistration", error));
+      });
   }, [startRegistration, supported]);
 
   React.useEffect(() => {
@@ -56,9 +65,11 @@ export function WalletCard() {
     setRefreshing(true);
     try {
       setBalance(await getBalance({}));
-    } catch {
+    } catch (error) {
       // A balance we could not read is left as-is rather than shown as zero — claiming
-      // someone holds nothing is worse than showing nothing.
+      // someone holds nothing is worse than showing nothing. It is still recorded, though:
+      // a balance read is a SAC simulation, so it failing says something about the account.
+      setDetail(logError("getMyBalance", error));
     } finally {
       setRefreshing(false);
     }
@@ -77,6 +88,7 @@ export function WalletCard() {
     }
 
     setCreating(true);
+    setDetail(null);
     const toastId = toast.loading("Confirm with Face ID…");
     try {
       // Synchronous inside the tap: `options` is already resolved.
@@ -92,9 +104,11 @@ export function WalletCard() {
       void refreshBalance();
     } catch (error) {
       // Dismissing Face ID is a decision, not a failure.
+      const described = logError("finishRegistration", error);
       if (error instanceof PasskeyError && error.code === "SIGNATURE_REJECTED") {
         toast.dismiss(toastId);
       } else {
+        setDetail(described);
         toast.error(walletErrorMessage(error), { id: toastId });
       }
       prefetch();
@@ -141,6 +155,7 @@ export function WalletCard() {
         <Button onClick={handleCreate} disabled={creating} className="tap-target w-full">
           {creating ? "Setting up…" : "Create wallet with Face ID"}
         </Button>
+        <ErrorDetail detail={detail} />
       </div>
     );
   }
@@ -181,6 +196,8 @@ export function WalletCard() {
       <p className="text-xs text-muted-foreground">
         Secured by a passkey on this device. Stellar testnet — no real-value assets.
       </p>
+
+      <ErrorDetail detail={detail} />
     </div>
   );
 }

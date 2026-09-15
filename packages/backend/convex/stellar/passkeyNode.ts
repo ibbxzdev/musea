@@ -10,6 +10,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { classifyStellarError, userMessageFor } from "@musea/shared";
 import { stellarConfig } from "./config";
 import { RelayerError, submitViaRelayer } from "./relayer";
+import { reportFailure } from "./diagnostics";
 import { TipError } from "./tipsNode";
 
 /**
@@ -142,7 +143,24 @@ export const provisionSmartAccount = internalAction({
 
     const response = registrationResponse as RegistrationResponseJSON;
 
+    /**
+     * Which round trip we are on, for the failure message.
+     *
+     * Provisioning is four network calls and they fail for completely different reasons —
+     * a malformed attestation, a relayer refusal, a deployment that never confirmed, an
+     * empty Friendbot. Without this, all four report the same "provisioning failed" and
+     * the first question is always "at which step", which the logs could not answer.
+     */
+    let step = "derive";
+
     try {
+      // Nothing secret here: an attestation is a public key plus metadata, and the whole
+      // point of the model is that the private half never leaves the Secure Enclave.
+      console.warn(
+        `[musea] provisionSmartAccount(${userId}) credential=${String(response?.id).slice(0, 24)} ` +
+          `hasPublicKey=${Boolean(response?.response?.publicKey)} rpId=${cfg.rpId}`,
+      );
+
       // ── 1. Derive the account from the credential ────────────────────────────────────
       // `createWallet` extracts the P-256 key from the attestation and derives the
       // contract address deterministically. `autoSubmit: false` because the shared
@@ -186,6 +204,8 @@ export const provisionSmartAccount = internalAction({
       );
 
       // ── 2. Deploy, gaslessly ─────────────────────────────────────────────────────────
+      step = "relayer-submit";
+      console.warn(`[musea] deploying ${created.contractId} via ${cfg.relayerUrl}`);
       const deployHash = await submitViaRelayer(
         created.relayerPayload.func,
         created.relayerPayload.auth,
@@ -196,6 +216,7 @@ export const provisionSmartAccount = internalAction({
       // cannot verify, and without these three it falls back to the public indexer, which
       // does not serve the claim it wants. Persisting them keeps the indexer off the
       // critical path permanently. See Story 2B.0, finding 3.
+      step = "confirm-deployment";
       const rpc = new StellarSdk.rpc.Server(cfg.rpcUrl);
       const creationTx = await rpc.pollTransaction(deployHash, { attempts: 30 });
       if (creationTx.status !== StellarSdk.rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -216,17 +237,25 @@ export const provisionSmartAccount = internalAction({
       // Separate from deployment on purpose: an account that exists but holds nothing is
       // recoverable on the next attempt, whereas coupling the two would make a funding
       // hiccup look like a failed account and tempt a second deployment.
+      step = "fund";
       await fundIfEmpty(ctx, accountId, created.contractId, created.credentialId, publicKeyHex);
 
+      console.warn(`[musea] provisioned ${created.contractId} for ${userId} (tx ${deployHash})`);
       return created.contractId;
     } catch (error) {
       const code = error instanceof TipError ? error.code : classifyStellarError(error);
-      console.error(`smart account provisioning failed for ${userId}: ${code}`);
       await ctx.runMutation(internal.stellar.internal.markSmartAccountFailed, {
         userId,
         deploymentError: detail(error),
       });
-      throw new ConvexError({ code, message: userMessageFor(code) });
+      throw new ConvexError(
+        reportFailure(
+          `provisionSmartAccount(${userId}, step=${step})`,
+          code,
+          userMessageFor(code),
+          error,
+        ),
+      );
     }
   },
 });

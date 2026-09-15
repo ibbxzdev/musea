@@ -24,10 +24,21 @@ import type { TipErrorCode } from "@musea/shared/errors";
  * returns the challenge before the user commits to sending.
  */
 
-/** Raised in the browser, so it carries a shared code but never came through Convex. */
+/**
+ * Raised in the browser, so it carries a shared code but never came through Convex.
+ *
+ * Keeps the original `DOMException` as `cause`. On iOS that exception's `name` is the
+ * entire diagnosis — `NotAllowedError` alone separates "the user dismissed the sheet"
+ * from "this domain has no credential" from "the sheet never appeared because activation
+ * was consumed" — and folding it into one of our codes discards exactly the detail that
+ * tells those apart. The code is what the UI shows; the cause is what gets debugged.
+ */
 export class PasskeyError extends Error {
-  constructor(readonly code: TipErrorCode) {
-    super(code);
+  constructor(
+    readonly code: TipErrorCode,
+    cause?: unknown,
+  ) {
+    super(code, { cause });
     this.name = "PasskeyError";
   }
 }
@@ -61,7 +72,7 @@ export async function createPasskey(options: unknown): Promise<unknown> {
       optionsJSON: options as Parameters<typeof startRegistration>[0]["optionsJSON"],
     });
   } catch (error) {
-    throw new PasskeyError(classify(error, "PASSKEY_PROVISIONING_FAILED"));
+    throw new PasskeyError(classify(error, "PASSKEY_PROVISIONING_FAILED"), error);
   }
 }
 
@@ -88,7 +99,7 @@ export async function signWithPasskey(args: {
       } as Parameters<typeof startAuthentication>[0]["optionsJSON"],
     });
   } catch (error) {
-    throw new PasskeyError(classify(error, "PASSKEY_AUTH_REJECTED"));
+    throw new PasskeyError(classify(error, "PASSKEY_AUTH_REJECTED"), error);
   }
 }
 

@@ -9,6 +9,7 @@ import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { classifyStellarError, toStroops, userMessageFor, type TipErrorCode } from "@musea/shared";
 import { stellarConfig } from "./config";
+import { reportFailure } from "./diagnostics";
 import { connectedKitFor, readSacBalance } from "./passkeyNode";
 
 /**
@@ -95,15 +96,27 @@ export const prepareTip = internalAction({
     ctx,
     { fromUserId, galleryId, amount },
   ): Promise<{ tipId: Id<"tips">; challenge: string; credentialId: string; rpId: string }> => {
+    /**
+     * Which stage we reached, for the failure message.
+     *
+     * `prepareTip` does six things that fail for unrelated reasons — a curator without a
+     * wallet, a balance that will not cover it, an RPC that will not simulate, a challenge
+     * the kit never produced. All of them classify to a code that describes the symptom
+     * rather than the stage, and on a phone the difference is invisible.
+     */
+    let step = "config";
+
     try {
       const cfg = stellarConfig();
 
       // ── 1. Who is paying ───────────────────────────────────────────────────────────
+      step = "load-account";
       const account = await ctx.runQuery(internal.stellar.internal.getSmartAccountByUser, {
         userId: fromUserId,
       });
 
       // ── 2. Gallery and curator ─────────────────────────────────────────────────────
+      step = "resolve-curator";
       const gallery = await ctx.runQuery(internal.stellar.internal.getGallery, { galleryId });
       if (!gallery) throw new TipError("UNKNOWN", `Gallery ${galleryId} does not exist.`);
       if (gallery.ownerId === fromUserId) {
@@ -112,6 +125,7 @@ export const prepareTip = internalAction({
       const toAddress = await resolveCuratorAddress(ctx, gallery.ownerId);
 
       // ── 3. Amount ──────────────────────────────────────────────────────────────────
+      step = "parse-amount";
       let stroops: bigint;
       try {
         stroops = toStroops(amount);
@@ -124,11 +138,13 @@ export const prepareTip = internalAction({
 
       // Connecting verifies the account's on-chain birth, so it also answers "is this
       // wallet real and usable" before the user is asked to authenticate.
+      step = "connect-kit";
       const { kit, account: connected } = await connectedKitFor(account);
 
       // Checked before Face ID rather than after. Simulation would catch it, but only as
       // an SAC error surfacing once the user has already authenticated — asking someone
       // for their face and then saying "insufficient funds" is the wrong order.
+      step = "read-balance";
       const balance = await readSacBalance(connected.contractAddress);
       if (balance < stroops) {
         throw new TipError(
@@ -140,6 +156,7 @@ export const prepareTip = internalAction({
       const hash = galleryHash(galleryId);
 
       // ── 4. Build + simulate + assemble ─────────────────────────────────────────────
+      step = "build-simulate";
       // Routed through the smart account's own `execute`, so the account is the caller
       // and `from` — which is what makes `require_auth` dispatch to its `__check_auth`.
       const tx = await kit.execute(cfg.tipjarContractId, "tip", [
@@ -149,6 +166,7 @@ export const prepareTip = internalAction({
         StellarSdk.nativeToScVal(stroops, { type: "i128" }),
       ]);
 
+      step = "latest-ledger";
       const rpc = new StellarSdk.rpc.Server(cfg.rpcUrl);
       const latest = await rpc.getLatestLedger();
       const expiration = latest.sequence + SIGNATURE_EXPIRATION_LEDGERS;
@@ -158,9 +176,11 @@ export const prepareTip = internalAction({
       // device. See the note at the top of this file: computing the digest independently
       // means reimplementing private context-rule resolution, and getting it subtly wrong
       // produces a signature the contract rejects for reasons that read as unrelated.
+      step = "derive-challenge";
       const challenge = await captureAuthChallenge(kit, tx, connected.credentialId, expiration);
 
       // ── 6. Record ──────────────────────────────────────────────────────────────────
+      step = "record";
       // After assembling but before anything is signed, so nothing can be submitted
       // without a row to reconcile against. Also arms the double-submit guard.
       const tipId: Id<"tips"> = await ctx.runMutation(internal.stellar.internal.recordTipPending, {
@@ -188,8 +208,14 @@ export const prepareTip = internalAction({
       };
     } catch (error) {
       const code = error instanceof TipError ? error.code : classifyStellarError(error);
-      console.error(`prepare tip failed: ${code}`);
-      throw new ConvexError({ code, message: userMessageFor(code) });
+      throw new ConvexError(
+        reportFailure(
+          `prepareTip(from=${fromUserId}, gallery=${galleryId}, amount=${amount}, step=${step})`,
+          code,
+          userMessageFor(code),
+          error,
+        ),
+      );
     }
   },
 });
@@ -267,8 +293,19 @@ export const submitTip = internalAction({
       userId: fromUserId,
     });
     if (!tip) {
-      throw new ConvexError({ code: "UNKNOWN" as const, message: userMessageFor("UNKNOWN") });
+      throw new ConvexError(
+        reportFailure(
+          `submitTip(${tipId}) ownership`,
+          "UNKNOWN",
+          userMessageFor("UNKNOWN"),
+          new Error(
+            `No pending tip ${tipId} owned by ${fromUserId} — already spent, or not theirs.`,
+          ),
+        ),
+      );
     }
+
+    let step = "prepared-state";
 
     try {
       if (!tip.preparedXdr || tip.signatureExpirationLedger == null || !tip.authChallenge) {
@@ -283,6 +320,7 @@ export const submitTip = internalAction({
       // The kit recomputes the digest and would fail anyway on a mismatch, but it fails
       // deep inside signing with a message about context rules. Checking here turns the
       // single most likely passkey bug into a named error instead of a puzzle.
+      step = "challenge-match";
       const answered = clientDataChallenge(assertion);
       if (answered !== tip.authChallenge) {
         throw new TipError(
@@ -291,14 +329,17 @@ export const submitTip = internalAction({
         );
       }
 
+      step = "connect-kit";
       const { kit } = await connectedKitFor(account, {
         startAuthentication: async () => assertion,
       });
 
       // ── 3. Rehydrate the transaction prepared in step 1 ────────────────────────────
+      step = "rehydrate";
       const rehydrated = rehydrate(tip.preparedXdr, cfg);
 
       // ── 4. Sign, re-simulate, submit gaslessly ─────────────────────────────────────
+      step = "sign-and-submit";
       const result = await kit.signAndSubmitAdmin(rehydrated, {
         credentialId: account?.credentialId,
         expiration: tip.signatureExpirationLedger,
@@ -321,13 +362,14 @@ export const submitTip = internalAction({
       return { status: "success", txHash: result.hash };
     } catch (error) {
       const code = error instanceof TipError ? error.code : classifyStellarError(error);
-      console.error(`tip ${tipId} failed at submit: ${code}`);
       await ctx.runMutation(internal.stellar.internal.markTipFailed, {
         tipId,
         errorCode: code,
         errorDetail: detailFor(error),
       });
-      throw new ConvexError({ code, message: userMessageFor(code) });
+      throw new ConvexError(
+        reportFailure(`submitTip(${tipId}, step=${step})`, code, userMessageFor(code), error),
+      );
     }
   },
 });
