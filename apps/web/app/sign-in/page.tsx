@@ -4,40 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "convex/react";
 import { api } from "@musea/backend/convex/_generated/api";
-import { userMessageFor } from "@musea/shared/errors";
 import { authClient, leaveAuthenticatedApp } from "@/lib/auth-client";
-import { FreighterError, useFreighter } from "@/lib/musea/freighter";
-import { signInWithFreighter } from "@/lib/musea/wallet-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 /**
- * Whether the email and password form is offered.
- *
- * **On. It is the only way into the app on a phone.** Freighter is a desktop extension
- * with no iOS build, so with this off iPhone Safari — the device CLAUDE.md names as the
- * verification target — has no path in at all. It was briefly off at the project owner's
- * direction; turning it back on also restores SOW §4.2a's ordering, which says Freighter
- * must stay additive rather than become the primary path.
- *
- * **The passkey work will not replace this.** It is worth being precise, because the
- * earlier note here assumed otherwise: the passkey in Deliverable 2 authorizes *tips* —
- * it signs the Soroban auth payload — and is not an authentication method. Nothing in
- * Epic 2B gives a phone user a way to sign in, so email has to stay until something
- * deliberately replaces it.
- *
- * Kept as a flag rather than unconditional JSX so the two paths stay independently
- * switchable; `emailAndPassword` is enabled in `packages/backend/convex/auth.ts`
- * regardless, so flipping this needs no backend change.
- *
- * Annotated `: boolean` deliberately. Without it TypeScript infers the literal type, and
- * every branch guarded on the other value reads as statically dead.
- */
-const EMAIL_SIGN_IN_ENABLED: boolean = true;
-
-/**
- * The way in. Currently a Stellar wallet, with email and password behind the flag above.
+ * The way in: email and password.
  *
  * Deliberately plain. This exists to satisfy Story 0.3's done-criteria — sign up, sign in,
  * `users.viewer` returns the row, sign out returns null — and to make the two-account demo
@@ -64,8 +37,6 @@ export default function SignInPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [walletBusy, setWalletBusy] = useState(false);
-  const freighter = useFreighter();
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -93,34 +64,6 @@ export default function SignInPage() {
     }
   }
 
-  /**
-   * Sign in by proving the wallet is yours.
-   *
-   * Separate from `submit` rather than another branch inside it: this path has no form
-   * fields, cannot fail validation, and its errors come back as FreighterErrors carrying a
-   * shared TipErrorCode. Folding it in would mean a form handler that ignores the form.
-   */
-  async function continueWithWallet() {
-    setError(null);
-    setWalletBusy(true);
-    try {
-      await signInWithFreighter();
-      // The session cookie is set. The redirect effect above takes it from here, once the
-      // viewer query confirms Convex agrees a user exists.
-      router.refresh();
-    } catch (err) {
-      if (err instanceof FreighterError && err.code === "SIGNATURE_REJECTED") {
-        // Declining the popup is a decision, not a failure. Saying nothing matches what
-        // the tip sheet does when a tip is cancelled.
-        return;
-      }
-      setError(
-        err instanceof FreighterError ? userMessageFor(err.code) : "That did not work. Try again.",
-      );
-    } finally {
-      setWalletBusy(false);
-    }
-  }
   /**
    * Into the app once the session is genuinely usable.
    *
@@ -187,133 +130,64 @@ export default function SignInPage() {
     <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center gap-6 px-6 py-12">
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">
-          {EMAIL_SIGN_IN_ENABLED && mode === "sign-up" ? "Create an account" : "Sign in"}
+          {mode === "sign-up" ? "Create an account" : "Sign in"}
         </h1>
         <p className="text-sm text-muted-foreground">Musea Curator Tips — Stellar testnet.</p>
       </div>
 
-      {EMAIL_SIGN_IN_ENABLED && (
-        <form onSubmit={submit} className="space-y-4">
-          {mode === "sign-up" && (
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                autoComplete="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-          )}
+      <form onSubmit={submit} className="space-y-4">
+        {mode === "sign-up" && (
           <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="name">Name</Label>
             <Input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              id="name"
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              required
-              minLength={8}
-              autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            required
+            minLength={8}
+            autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
 
-          <Button type="submit" className="tap-target w-full" disabled={busy || isPending}>
-            {busy ? "Working…" : mode === "sign-up" ? "Create account" : "Sign in"}
-          </Button>
-        </form>
-      )}
+        <Button type="submit" className="tap-target w-full" disabled={busy || isPending}>
+          {busy ? "Working…" : mode === "sign-up" ? "Create account" : "Sign in"}
+        </Button>
+      </form>
 
-      {/*
-        Errors live out here rather than inside the form, because both paths set them and
-        either one can be the only path rendered. Inside the form, a wallet failure would
-        have nowhere to appear on a phone, where the form is all there is.
-      */}
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      {/*
-        Hidden entirely when there is no extension, rather than rendered disabled. Freighter
-        is desktop-only, so on a phone a visible "Continue with Freighter" button would be a
-        dead end with no explanation.
-      */}
-      {freighter.state !== "unavailable" ? (
-        <div className="space-y-3">
-          {/* A divider only divides something. With email hidden there is nothing above. */}
-          {EMAIL_SIGN_IN_ENABLED && (
-            <div className="flex items-center gap-3">
-              <span className="h-px flex-1 bg-border" />
-              <span className="text-xs text-muted-foreground">or</span>
-              <span className="h-px flex-1 bg-border" />
-            </div>
-          )}
-
-          <Button
-            type="button"
-            variant="outline"
-            className="tap-target w-full"
-            disabled={busy || walletBusy || freighter.state === "checking"}
-            onClick={continueWithWallet}
-          >
-            {walletBusy ? "Check Freighter…" : "Continue with Freighter"}
-          </Button>
-
-          {/*
-            Freighter has only one approval popup, and it says "transaction". Saying so
-            first is the difference between a signature people give and one they abandon.
-          */}
-          <p className="text-xs text-muted-foreground">
-            Freighter will ask you to approve a transaction. It has sequence number 0, so it can
-            never be submitted — signing only proves the wallet is yours. Nothing moves.
-          </p>
-        </div>
-      ) : (
-        /*
-          No extension, and with email hidden there is now no other way in. Saying so beats
-          a screen with a heading and nothing under it — which is what this page would
-          otherwise be on every phone.
-        */
-        !EMAIL_SIGN_IN_ENABLED && (
-          <div className="space-y-2 rounded-lg border p-4">
-            <p className="text-sm font-medium">Freighter is required to sign in</p>
-            <p className="text-sm text-muted-foreground">
-              Musea signs you in with a Stellar wallet. Freighter is a desktop browser extension and
-              has no iOS build, so this needs a computer for now.
-            </p>
-            <a
-              href="https://www.freighter.app"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-block text-sm text-stellar underline underline-offset-4"
-            >
-              Get Freighter
-            </a>
-          </div>
-        )
-      )}
-
-      {EMAIL_SIGN_IN_ENABLED && (
-        <Button
-          variant="ghost"
-          className="tap-target"
-          onClick={() => {
-            setMode(mode === "sign-up" ? "sign-in" : "sign-up");
-            setError(null);
-          }}
-        >
-          {mode === "sign-up" ? "I already have an account" : "Create an account instead"}
-        </Button>
-      )}
+      <Button
+        variant="ghost"
+        className="tap-target"
+        onClick={() => {
+          setMode(mode === "sign-up" ? "sign-in" : "sign-up");
+          setError(null);
+        }}
+      >
+        {mode === "sign-up" ? "I already have an account" : "Create an account instead"}
+      </Button>
     </main>
   );
 }

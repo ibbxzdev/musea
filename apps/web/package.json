@@ -15,7 +15,7 @@
     "@convex-dev/better-auth": "0.12.5",
     "@musea/backend": "workspace:*",
     "@musea/shared": "workspace:*",
-    "@stellar/freighter-api": "^6.0.1",
+    "@simplewebauthn/browser": "^13.3.0",
     "better-auth": "1.6.31",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

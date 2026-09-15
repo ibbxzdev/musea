@@ -5,7 +5,6 @@ import { components, internal } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import authConfig from "./auth.config";
-import { stellarWallet } from "./model/walletAuth";
 
 /**
  * Better Auth, wired through the @convex-dev/better-auth component.
@@ -101,35 +100,24 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
     user: { deleteUser: { enabled: true } },
 
     /**
-     * Rate limiting, with two deliberate departures from the defaults.
+     * Rate limiting, with one deliberate departure from the defaults.
      *
      * **storage: "database"**. The default is "memory", which on Convex means a counter
      * living inside one function isolate — isolates come and go per request, so the limit
      * silently does almost nothing. The Better Auth component ships a `rateLimit` table
-     * for exactly this; using it is what makes the limits below real.
+     * for exactly this; using it is what makes Better Auth's own limits real.
      *
-     * **A custom rule for `/stellar/*`.** Better Auth applies a strict 3-per-10s to
-     * `/sign-in` and `/sign-up`, and a loose 100-per-10s to everything else, matched by
-     * path prefix. Wallet sign-in mints a session just as email sign-in does, but its
-     * paths do not begin with `/sign-in`, so without this it would inherit the loose
-     * bucket — the weakest limit on the most sensitive endpoint. This puts it back in the
-     * same tier as the flow it is an alternative to.
-     *
-     * **Six, not three, and that is not a weaker limit.** Better Auth's 3-per-10s is
-     * counted in requests, and an email attempt is one request. A wallet attempt is two —
-     * `/stellar/nonce` then `/stellar/verify` — so copying the number would buy one
-     * attempt and half of a second one: retry within ten seconds of a fumbled Freighter
-     * popup and the retry's `verify` is request four and gets a 429. Six requests is the
-     * same three attempts, expressed in the units this flow actually spends.
+     * There is no longer a custom rule here. One existed for `/stellar/*`, the SEP-0010
+     * wallet sign-in endpoints, which minted sessions without matching the `/sign-in`
+     * prefix Better Auth's strict 3-per-10s bucket keys on. Those endpoints are gone with
+     * the Freighter removal, so email sign-in and sign-up are once again the only
+     * session-minting paths and the built-in strict rule covers both.
      *
      * `enabled` is left at its default, which is production-only. Turning it on in
      * development would cap sign-in while iterating.
      */
     rateLimit: {
       storage: "database",
-      customRules: {
-        "/stellar/*": { window: 10, max: 6 },
-      },
     },
 
     /**
@@ -144,7 +132,7 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
 
     // `authConfig` is required — it's how Convex learns to validate the JWTs this
     // issues, which is what makes ctx.auth.getUserIdentity() work.
-    plugins: [convex({ authConfig }), stellarWallet(ctx)],
+    plugins: [convex({ authConfig })],
   });
 
 function trustedOrigins(): string[] {

@@ -19,16 +19,27 @@ export type TipErrorCode =
   | "CONTRACT_NOT_INITIALIZED"
   | "OVERFLOW"
   | "NETWORK_MISCONFIGURED"
-  // ── External (user-brought) wallets: Freighter ──────────────────────────────────────
-  | "WALLET_NOT_CONNECTED"
-  | "WALLET_NOT_INSTALLED"
-  | "WALLET_NETWORK_MISMATCH"
-  | "WALLET_ADDRESS_CHANGED"
-  | "WALLET_NOT_FUNDED"
   | "CURATOR_NOT_FUNDED"
   | "CURATOR_NOT_CONNECTED"
   | "SIGNATURE_REJECTED"
   | "TRANSACTION_MISMATCH"
+  // ── Passkey smart accounts (Story 2B.4) ─────────────────────────────────────────────
+  //
+  // Failure modes that did not exist under custody, because under custody nothing about
+  // signing could fail in the user's hands. Each of these is something the *device* did.
+  | "PASSKEY_UNSUPPORTED"
+  | "PASSKEY_NOT_REGISTERED"
+  | "PASSKEY_RP_MISMATCH"
+  | "PASSKEY_PROVISIONING_FAILED"
+  | "PASSKEY_AUTH_REJECTED"
+  | "CHALLENGE_MISMATCH"
+  // ── Gasless submission ──────────────────────────────────────────────────────────────
+  //
+  // Kept distinct from contract failures on purpose: a tip that never reached the network
+  // is a retry, a tip the contract rejected is not, and wording them alike trains people
+  // to retry the one thing that will never succeed.
+  | "RELAYER_UNAVAILABLE"
+  | "RELAYER_REJECTED"
   | "UNKNOWN";
 
 /** Contract error variants, mirroring the `Error` enum in contracts/tipjar/src/lib.rs. */
@@ -75,22 +86,37 @@ const USER_MESSAGES: Record<TipErrorCode, string> = {
   CONTRACT_NOT_INITIALIZED: "Tipping is temporarily unavailable.",
   OVERFLOW: "That amount is too large.",
   NETWORK_MISCONFIGURED: "Tipping is temporarily unavailable.",
-  WALLET_NOT_CONNECTED: "Connect your wallet first.",
-  WALLET_NOT_INSTALLED: "Freighter isn't installed in this browser.",
-  WALLET_NETWORK_MISMATCH: "Switch Freighter to Testnet to tip.",
-  // Freighter signed as a different account than the one the transaction was built for —
-  // the user switched accounts mid-flow. Submitting would fail on the source account.
-  WALLET_ADDRESS_CHANGED: "Freighter switched accounts. Reconnect and try again.",
-  // Distinct from ACCOUNT_NOT_FUNDED, which means "our provisioning is still running, wait".
-  // This is the user's own wallet, and waiting will never fix it — only they can act, so
-  // the message says what to do rather than asking for patience.
-  WALLET_NOT_FUNDED: "Your connected wallet has no testnet account yet. Fund it, then retry.",
-  // The curator's side of the same problem. XLM needs no trustline, but the destination
-  // account still has to exist on the network before anything can be sent to it.
+  // The curator has an address but nothing has ever reached it. XLM needs no trustline, so
+  // a smart account can always receive — this is only reachable for a classic destination.
   CURATOR_NOT_FUNDED: "This curator's wallet isn't set up on Stellar testnet yet.",
-  // Not really an error — the user changed their mind in the wallet popup. The UI
-  // dismisses rather than showing this, but a message exists so nothing renders blank.
+  // Not really an error — the user dismissed Face ID. The UI dismisses rather than showing
+  // this, but a message exists so nothing renders blank.
   SIGNATURE_REJECTED: "Tip cancelled.",
+
+  // ── Passkey ─────────────────────────────────────────────────────────────────────────
+  // Old iOS, or an in-app browser (Instagram, TikTok) that does not expose WebAuthn. The
+  // user cannot fix the browser they are in, so the message names the way out.
+  PASSKEY_UNSUPPORTED: "This browser can't create a passkey. Open Musea in Safari or Chrome.",
+  // No account yet, or the credential lives on a different device. Offer the way forward
+  // rather than dead-ending: creating a wallet is one tap.
+  PASSKEY_NOT_REGISTERED: "Set up your wallet to tip — it takes one tap and Face ID.",
+  // The credential was created for another domain, so the device will not surface it. This
+  // is a dev-vs-production mix-up in practice and should never reach a user in production.
+  PASSKEY_RP_MISMATCH: "This wallet belongs to a different site. Set one up here to continue.",
+  PASSKEY_PROVISIONING_FAILED: "Couldn't finish setting up your wallet. Please try again.",
+  // The device produced a signature the smart account's __check_auth refused. Genuinely
+  // shouldn't happen; if it does it is ours to fix, so it does not ask the user to retry
+  // forever.
+  PASSKEY_AUTH_REJECTED: "That signature wasn't accepted. Please try setting up your wallet again.",
+  // The assertion answers a different challenge than the one we issued — a stale sheet, or
+  // two tips raced. Retrying regenerates the challenge, so retrying is the right advice.
+  CHALLENGE_MISMATCH: "That tip expired before it was signed. Please try again.",
+
+  // ── Gasless submission ──────────────────────────────────────────────────────────────
+  // Musea pays the fees, so both of these are our problem, not the user's wallet's, and
+  // neither should suggest they are out of funds.
+  RELAYER_UNAVAILABLE: "Can't reach the network right now. Please try again in a moment.",
+  RELAYER_REJECTED: "That tip couldn't be submitted. Please try again.",
   // The envelope coming back is not the one we built. Either something rewrote it in
   // transit or the wallet signed a different transaction; either way we do not submit it.
   TRANSACTION_MISMATCH: "That tip couldn't be verified. Please try again.",

@@ -5,11 +5,11 @@ import { internalMutation, internalQuery } from "../_generated/server";
  * Database helpers for the Stellar layer.
  *
  * These run in the DEFAULT Convex runtime (no "use node") — they touch only the database.
- * Actions cannot write to the database, so every persistence step in wallets.ts/tips.ts
+ * Actions cannot write to the database, so every persistence step in passkeyNode.ts/tipsNode.ts
  * goes through one of these.
  *
  * Everything here is `internal*`: none of it is reachable from the client. The public,
- * auth-guarded surfaces are `./tips.ts` and `./external.ts`.
+ * auth-guarded surfaces are `./tips.ts` and `./passkey.ts`.
  */
 
 export const getGallery = internalQuery({
@@ -91,54 +91,113 @@ export const markTipFailed = internalMutation({
   },
 });
 
-// ── External (user-brought) wallets ──────────────────────────────────────────────────
+// ── Passkey smart accounts ───────────────────────────────────────────────────────────
 //
-// Freighter and friends. There is no secret in any of these rows, so unlike
-// `getWalletByUser` above, the risk here is not key leakage — it is one user acting as
-// another. Every helper is still `internal*`; the public surface is `./external.ts`,
-// which derives the caller from `ctx.auth` and never takes a userId.
+// There is no secret in any of these rows and there never can be — the signing key lives
+// in the device's Secure Enclave and is not extractable. So the risk guarded against here
+// is not key leakage but one user acting as another. Every helper is `internal*`; the
+// public surface is `./passkey.ts`, which derives the caller from `ctx.auth` and never
+// takes a userId.
 
-export const getExternalWalletByUser = internalQuery({
+export const getSmartAccountByUser = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
     return await ctx.db
-      .query("externalWallets")
+      .query("smartAccounts")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
   },
 });
 
-export const linkExternalWallet = internalMutation({
-  args: { userId: v.id("users"), publicKey: v.string(), network: v.string() },
-  handler: async (ctx, { userId, publicKey, network }) => {
-    // One external wallet per user: re-linking replaces rather than accumulates, so
-    // "which address am I tipping from" always has exactly one answer.
+/**
+ * Create the account row, or return the existing one.
+ *
+ * **Never replaces a deployed account.** Provisioning is retried, and a retry that minted
+ * a second account would strand whatever the first one held — with no way back, since the
+ * credential that signs for it is bound to the device. A user gets one smart account; if a
+ * row already exists, that is the answer.
+ */
+export const upsertSmartAccount = internalMutation({
+  args: {
+    userId: v.id("users"),
+    contractAddress: v.string(),
+    credentialId: v.string(),
+    publicKeyHex: v.string(),
+    rpId: v.string(),
+    status: v.union(v.literal("pending"), v.literal("deployed"), v.literal("failed")),
+  },
+  handler: async (ctx, args) => {
     const existing = await ctx.db
-      .query("externalWallets")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .query("smartAccounts")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .unique();
 
     if (existing) {
-      await ctx.db.patch(existing._id, { publicKey, network, linkedAt: Date.now() });
+      if (existing.status === "deployed") return existing._id;
+      // A pending or failed row is a provisioning attempt that did not finish. Re-point it
+      // at this attempt's credential rather than accumulating dead rows.
+      await ctx.db.patch(existing._id, {
+        contractAddress: args.contractAddress,
+        credentialId: args.credentialId,
+        publicKeyHex: args.publicKeyHex,
+        rpId: args.rpId,
+        status: args.status,
+        deploymentError: undefined,
+      });
       return existing._id;
     }
-    return await ctx.db.insert("externalWallets", {
-      userId,
-      publicKey,
-      network,
-      linkedAt: Date.now(),
+
+    return await ctx.db.insert("smartAccounts", {
+      ...args,
+      funded: false,
+      createdAt: Date.now(),
     });
   },
 });
 
-export const unlinkExternalWallet = internalMutation({
-  args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
+export const markSmartAccountDeployed = internalMutation({
+  args: {
+    accountId: v.id("smartAccounts"),
+    birthWasmHash: v.string(),
+    creationTransactionHash: v.string(),
+    creationLedger: v.number(),
+  },
+  handler: async (ctx, { accountId, ...birth }) => {
+    await ctx.db.patch(accountId, { ...birth, status: "deployed", deploymentError: undefined });
+  },
+});
+
+export const markSmartAccountFunded = internalMutation({
+  args: { accountId: v.id("smartAccounts") },
+  handler: async (ctx, { accountId }) => {
+    await ctx.db.patch(accountId, { funded: true });
+  },
+});
+
+export const markSmartAccountFailed = internalMutation({
+  args: { userId: v.id("users"), deploymentError: v.string() },
+  handler: async (ctx, { userId, deploymentError }) => {
     const existing = await ctx.db
-      .query("externalWallets")
+      .query("smartAccounts")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
-    if (existing) await ctx.db.delete(existing._id);
+    // A deployment that already succeeded must not be demoted by a later failure in, say,
+    // the funding step — the account exists on-chain regardless of what happened after.
+    if (!existing || existing.status === "deployed") return;
+    await ctx.db.patch(existing._id, { status: "failed", deploymentError });
+  },
+});
+
+/** Hold the in-flight passkey state while the browser signs. See the schema comment. */
+export const attachPreparedTip = internalMutation({
+  args: {
+    tipId: v.id("tips"),
+    preparedXdr: v.string(),
+    signatureExpirationLedger: v.number(),
+    authChallenge: v.string(),
+  },
+  handler: async (ctx, { tipId, ...prepared }) => {
+    await ctx.db.patch(tipId, prepared);
   },
 });
 
@@ -161,51 +220,29 @@ export const getOwnedPendingTip = internalQuery({
   },
 });
 
+/** The caller's profile row, for the display name shown in the OS passkey sheet. */
+export const getUser = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    return await ctx.db.get(userId);
+  },
+});
+
 /**
- * Link a wallet to the Musea profile behind a Better Auth subject.
+ * Detach a smart account from a Musea profile.
  *
- * The wallet sign-in plugin (convex/model/walletAuth.ts) knows the Better Auth user id,
- * because that is what it just created a session for. It does not know the `users._id`,
- * and it must not take one from the client. This resolves the one from the other.
- *
- * Why link at all: a curator who signed in *with* a wallet has, by construction, proved
- * they hold its key. Making them press "Connect wallet" afterwards to become tippable
- * would be asking for the same proof twice. Signing in is the connection.
- *
- * Returns false when no profile row exists yet rather than throwing. The session is
- * already created by the time this runs, so a failure here must not read as a failed
- * sign-in — the user is signed in, just not yet tippable, and the connect-wallet flow in
- * the app is the recovery path.
+ * Deletes the row and nothing else. The account stays deployed on-chain with its balance
+ * intact and the passkey stays in the device's Secure Enclave — neither is ours to destroy.
+ * Registering again on the same device derives the same contract address, so this is
+ * reversible by construction.
  */
-export const linkExternalWalletByAuthSubject = internalMutation({
-  args: { authSubject: v.string(), publicKey: v.string(), network: v.string() },
-  handler: async (ctx, { authSubject, publicKey, network }): Promise<boolean> => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_authSubject", (q) => q.eq("authSubject", authSubject))
-      .unique();
-    if (!user) return false;
-
+export const deleteSmartAccount = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
     const existing = await ctx.db
-      .query("externalWallets")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .query("smartAccounts")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
-
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        publicKey,
-        network: network.toUpperCase(),
-        linkedAt: Date.now(),
-      });
-      return true;
-    }
-
-    await ctx.db.insert("externalWallets", {
-      userId: user._id,
-      publicKey,
-      network: network.toUpperCase(),
-      linkedAt: Date.now(),
-    });
-    return true;
+    if (existing) await ctx.db.delete(existing._id);
   },
 });

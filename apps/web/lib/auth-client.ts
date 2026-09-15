@@ -2,8 +2,6 @@
 
 import { createAuthClient } from "better-auth/react";
 import { convexClient } from "@convex-dev/better-auth/client/plugins";
-import type { BetterAuthClientPlugin } from "better-auth/client";
-import type { stellarWallet } from "@musea/backend/convex/model/walletAuth";
 
 /**
  * Where the browser sends `/api/auth/*` requests.
@@ -18,9 +16,9 @@ import type { stellarWallet } from "@musea/backend/convex/model/walletAuth";
  * NEXT_PUBLIC_* values are inlined at build time, so changing one in Vercel does nothing
  * until you redeploy.
  *
- * Note this has no bearing on the passkey Relying Party ID (Story 2.1). That is fixed by
- * the hostname the page is served from, not by this value — previews still cannot share
- * credentials with production, and the demo domain still has to be pinned up front.
+ * Note this has no bearing on the passkey Relying Party ID. That is fixed by the hostname
+ * the page is served from, not by this value — previews still cannot share credentials
+ * with production, and the demo domain still has to be pinned up front.
  */
 function resolveBaseURL(): string | undefined {
   // The browser: same-origin by construction, correct on localhost, previews and prod.
@@ -42,53 +40,6 @@ function resolveBaseURL(): string | undefined {
 }
 
 /**
- * Client half of the Stellar wallet sign-in plugin.
- *
- * Purely a type carrier and a route table — there is no logic here, and deliberately so.
- * `$InferServerPlugin` imports the *type* of the server plugin, which is what gives
- * `authClient.stellar.nonce()` and `.verify()` their argument and return types; `import
- * type` means nothing from the backend reaches the bundle at runtime.
- *
- * The paths mirror the endpoints in packages/backend/convex/model/walletAuth.ts. Better
- * Auth turns each path segment into a nested property, so `/stellar/nonce` is reached as
- * `authClient.stellar.nonce`.
- */
-const stellarWalletClient = () =>
-  ({
-    id: "stellar-wallet",
-    $InferServerPlugin: {} as ReturnType<typeof stellarWallet>,
-    pathMethods: {
-      "/stellar/nonce": "POST",
-      "/stellar/verify": "POST",
-    },
-
-    /**
-     * Tell the client that `/stellar/verify` starts a session.
-     *
-     * Without this, wallet sign-in sets the cookie and then appears to do nothing: the
-     * server is satisfied, but `useSession()` goes on returning null until something
-     * reloads the page. Anything gated on the session — the redirect on the sign-in page,
-     * and the Convex token that `convexClient()` mints from it — waits forever.
-     *
-     * The reason is that Better Auth decides when to refetch the session from a fixed list
-     * of *exact* paths (`/sign-in/email`, `/sign-up/email`, `/sign-out`, ...) in
-     * `client/config.mjs`. It is equality, not a prefix match, and there is no hook for
-     * "this endpoint authenticated someone" — so every plugin that mints a session has to
-     * say so here. better-auth's own admin plugin does exactly this for
-     * `/admin/impersonate-user`, which changes the session without being a sign-in path.
-     *
-     * `/stellar/nonce` is deliberately absent: it issues a challenge and changes nothing
-     * about who the caller is.
-     */
-    atomListeners: [
-      {
-        matcher: (path: string) => path === "/stellar/verify",
-        signal: "$sessionSignal",
-      },
-    ],
-  }) satisfies BetterAuthClientPlugin;
-
-/**
  * Better Auth browser client.
  *
  * The `convexClient()` plugin is what lets ConvexBetterAuthProvider mint Convex tokens
@@ -101,7 +52,7 @@ const stellarWalletClient = () =>
  */
 export const authClient = createAuthClient({
   baseURL: resolveBaseURL(),
-  plugins: [convexClient(), stellarWalletClient()],
+  plugins: [convexClient()],
 });
 
 /**

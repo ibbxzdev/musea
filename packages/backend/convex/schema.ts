@@ -190,62 +190,68 @@ export default defineSchema({
   // ----------------------------------------------------------------- Stellar
 
   /**
-   * ⚠ ORPHANED — app-managed custodial wallets, from before wallets became the user's own.
+   * A user's non-custodial passkey smart account (SOW §4.2, Story 2B.1).
    *
-   * **No code reads or writes this table any more.** Every function that did is deleted:
-   * `stellar/wallets.ts`, `stellar/walletsNode.ts` and `stellar/crypto.ts` are gone, and
-   * nothing can decrypt `encryptedSecret` any longer — the ciphertext outlives its only
-   * reader.
+   * **Every field here is public by construction.** The contract address is on-chain, the
+   * credential id is a public WebAuthn handle, and the public key is, definitionally,
+   * public. The signing key was generated inside the device's Secure Enclave and is not
+   * extractable — not by the browser, not by us. There is deliberately no field here that
+   * a total backend compromise could turn into a spend, which is CLAUDE.md rule 3 and the
+   * reason the custodial `stellarWallets` table this replaces is gone rather than migrated.
    *
-   * It is still declared **only because rows exist**, and Convex refuses to push a schema
-   * that omits a populated table. Those rows hold testnet XLM in accounts nobody can now
-   * spend from, so purging them destroys (worthless) funds — a deliberate decision, not a
-   * cleanup to slip into an unrelated change.
-   *
-   * **Delete the rows, then delete this table.** Leaving encrypted key material in the
-   * database contradicts CLAUDE.md rule 3, which is the whole point of the change that
-   * orphaned it.
+   * One row per user: `by_user` is the lookup every tip goes through, and a second account
+   * would make "which address am I tipping from" ambiguous.
    */
-  stellarWallets: defineTable({
+  smartAccounts: defineTable({
     userId: v.id("users"),
-    /** G... public key. Safe to expose to the client. */
-    publicKey: v.string(),
-    /** AES-256-GCM ciphertext of the S... secret key. Unreadable: the key module is gone. */
-    encryptedSecret: v.string(),
-    /** Provisioning is multi-step and can fail partway; these track where it got to. */
+    /** C... smart account contract address. This is what a tip is paid from and into. */
+    contractAddress: v.string(),
+    /** base64url WebAuthn credential id — which passkey signs for this account. */
+    credentialId: v.string(),
+    /** 65-byte uncompressed secp256r1 public key, hex. The on-chain signer's identity. */
+    publicKeyHex: v.string(),
+
+    /**
+     * The Relying Party ID the credential was created under.
+     *
+     * Persisted rather than assumed, because a passkey only resolves under the domain that
+     * created it. A row written against `localhost` is unusable on the deployed site and
+     * vice versa; storing the RP ID is what lets the app say so instead of surfacing an
+     * inscrutable WebAuthn failure.
+     */
+    rpId: v.string(),
+
+    /**
+     * Immutable birth provenance, verified against on-chain history on every connect.
+     *
+     * Not decoration: `connectWallet` refuses an account whose birth it cannot verify, and
+     * with these three absent it falls back to the public indexer — which does not serve
+     * the claim the kit wants, so that path fails permanently rather than transiently.
+     * We submit the deployment ourselves and therefore know all three; persisting them is
+     * what keeps the indexer off the critical path entirely. See Story 2B.0, finding 3.
+     *
+     * Optional because a row exists from the moment deployment is attempted, and these are
+     * only knowable once it has landed.
+     */
+    birthWasmHash: v.optional(v.string()),
+    creationTransactionHash: v.optional(v.string()),
+    creationLedger: v.optional(v.number()),
+
+    /**
+     * Provisioning is several network round trips and can fail partway; the retry path is
+     * the one that actually gets exercised, so where it got to has to be legible.
+     */
+    status: v.union(v.literal("pending"), v.literal("deployed"), v.literal("failed")),
+    /** Server-side detail for a failed deployment. Never rendered to the client raw. */
+    deploymentError: v.optional(v.string()),
+    /** Whether the account has been given its starting test XLM. */
     funded: v.boolean(),
-    trustlineReady: v.boolean(),
-    seeded: v.boolean(),
-    /** Last known XLM balance in stroops, stored as a string (bigint isn't a Convex type). */
-    cachedBalanceStroops: v.optional(v.string()),
-    balanceUpdatedAt: v.optional(v.number()),
+
     createdAt: v.number(),
   })
     .index("by_user", ["userId"])
-    .index("by_publicKey", ["publicKey"]),
-
-  /**
-   * A wallet the user brought themselves — Freighter today.
-   *
-   * Deliberately a separate table from `stellarWallets` rather than a `kind` column on it.
-   * `stellarWallets`'s invariant is "every row has an `encryptedSecret`", which is what
-   * makes the authz test asserting `getMyWallet` never serializes that field meaningful.
-   * An external wallet has no secret to hold — we only ever know its public address — and
-   * collapsing the two would weaken a check that exists to protect key material.
-   *
-   * There is no secret here, and there never can be: the key lives in the user's browser
-   * extension and this backend cannot reach it.
-   */
-  externalWallets: defineTable({
-    userId: v.id("users"),
-    /** G... address reported by the wallet. Public by construction. */
-    publicKey: v.string(),
-    /** Freighter's network at link time, e.g. "TESTNET". A mainnet wallet must not tip. */
-    network: v.string(),
-    linkedAt: v.number(),
-  })
-    .index("by_user", ["userId"])
-    .index("by_publicKey", ["publicKey"]),
+    .index("by_contractAddress", ["contractAddress"])
+    .index("by_credentialId", ["credentialId"]),
 
   tips: defineTable({
     fromUserId: v.id("users"),
@@ -259,12 +265,46 @@ export default defineSchema({
     amountStroops: v.string(),
     txHash: v.optional(v.string()),
     /**
-     * For externally-signed (Freighter) tips only: the hash of the transaction this server
-     * built and handed to the wallet. Signing does not change a transaction's hash, so on
-     * submit we can prove the envelope coming back is the one we built and not a
-     * substitute. Absent on managed-wallet tips, which never leave the server.
+     * Historical, from the Freighter era: the hash of the transaction handed to the
+     * extension, used to prove the signed envelope coming back was the one we built.
+     * Nothing writes it now — under the passkey model the prepared transaction never
+     * leaves the server, so there is no envelope to re-verify. Kept so existing rows
+     * still validate.
      */
     preparedTxHash: v.optional(v.string()),
+
+    /**
+     * The passkey flow's in-flight state, held between `prepareTip` and `submitTip`.
+     *
+     * The signature crosses to the browser and back, but **the transaction never does**.
+     * Keeping it here rather than round-tripping it through the client is what removes a
+     * whole class of problem: there is no client-supplied envelope to validate, because
+     * the client was never given one. The browser holds an opaque tip id and a challenge.
+     *
+     * Both must survive unchanged, because the auth digest the passkey signed is derived
+     * from exactly this transaction and this expiration ledger. Rebuild either and the
+     * digest moves, and `__check_auth` rejects a signature that is otherwise perfectly
+     * valid.
+     *
+     * Context rule ids are deliberately *not* stored. They are resolved from chain state
+     * by the kit, identically in both halves, and duplicating that resolution here is how
+     * the two would drift — the contract wants one id per auth context, and a `tip` has
+     * two (the call, and the SAC transfer nested under it).
+     *
+     * Cleared once the tip reaches a terminal state — it is transient state, not a record,
+     * and the XDR is the largest thing on the row.
+     */
+    preparedXdr: v.optional(v.string()),
+    signatureExpirationLedger: v.optional(v.number()),
+    /**
+     * base64url of the auth digest handed to the browser as the WebAuthn challenge.
+     *
+     * Kept so `submitTip` can assert the assertion coming back answers *this* challenge.
+     * The kit recomputes the digest independently and would fail anyway on a mismatch, but
+     * it fails deep inside signing with a message about context rules. Checking here turns
+     * the single most likely passkey bug into a named error instead of a puzzle.
+     */
+    authChallenge: v.optional(v.string()),
     status: v.union(v.literal("pending"), v.literal("success"), v.literal("failed")),
     /** Classified code from @musea/shared errors, not a raw Stellar string. */
     errorCode: v.optional(v.string()),

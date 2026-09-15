@@ -6,8 +6,7 @@
   "type": "module",
   "exports": {
     "./convex/_generated/api": "./convex/_generated/api.js",
-    "./convex/_generated/dataModel": "./convex/_generated/dataModel.js",
-    "./convex/model/walletAuth": "./convex/model/walletAuth.ts"
+    "./convex/_generated/dataModel": "./convex/_generated/dataModel.js"
   },
   "scripts": {
     "dev": "convex dev",
