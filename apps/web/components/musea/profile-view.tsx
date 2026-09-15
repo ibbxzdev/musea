@@ -23,7 +23,7 @@ import { initialsOf } from "@/lib/musea/format";
 import type { Viewer } from "@/lib/musea/types";
 import { cn } from "@/lib/utils";
 import { ResponsiveModal } from "./responsive-modal";
-import { ConnectWallet } from "./connect-wallet";
+import { WalletCard } from "./wallet-card";
 
 /**
  * The account section.
@@ -74,7 +74,7 @@ export function ProfileView() {
         <Stat label="Tags" value={stats?.tags} />
       </dl>
 
-      <ConnectWallet />
+      <WalletCard />
 
       <SettingsGroup label="Account">
         <SettingsRow

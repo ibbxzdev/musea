@@ -3,18 +3,13 @@
 import { randomBytes } from "node:crypto";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { ConvexError, v } from "convex/values";
-import {
-  MemoryStorage,
-  SmartAccountKit,
-  type RegistrationResponseJSON,
-  type AuthenticationResponseJSON,
-  type StoredCredential,
-} from "smart-account-kit";
+import { MemoryStorage, SmartAccountKit, type StoredCredential } from "smart-account-kit";
 import { internalAction, type ActionCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { classifyStellarError, userMessageFor } from "@musea/shared";
 import { stellarConfig } from "./config";
+import { RelayerError, submitViaRelayer } from "./relayer";
 import { TipError } from "./tipsNode";
 
 /**
@@ -41,6 +36,29 @@ import { TipError } from "./tipsNode";
  * `internalAction`s, so a `userId` argument is safe here. The auth-guarded surface is
  * `./passkey.ts`.
  */
+
+/**
+ * The WebAuthn payloads that cross between browser and server.
+ *
+ * Declared here rather than imported: the kit re-exports these from
+ * `@simplewebauthn/browser`, and pulling that package into the backend to borrow two
+ * structural types would add a browser dependency for no runtime benefit. They are
+ * `v.any()` at the Convex boundary regardless — the shapes are the authenticator's, not
+ * ours, and the kit is what actually parses them.
+ */
+export type RegistrationResponseJSON = {
+  id: string;
+  rawId: string;
+  type: string;
+  response: { clientDataJSON: string; attestationObject: string; publicKey?: string };
+};
+
+export type AuthenticationResponseJSON = {
+  id: string;
+  rawId: string;
+  type: string;
+  response: { clientDataJSON: string; authenticatorData: string; signature: string };
+};
 
 /** Shown in the OS passkey sheet. Users see this next to the domain. */
 const APP_NAME = "Musea";
@@ -168,7 +186,6 @@ export const provisionSmartAccount = internalAction({
       );
 
       // ── 2. Deploy, gaslessly ─────────────────────────────────────────────────────────
-      const { submitViaRelayer } = await import("./relayer");
       const deployHash = await submitViaRelayer(
         created.relayerPayload.func,
         created.relayerPayload.auth,
@@ -299,8 +316,16 @@ export async function readSacBalance(address: string): Promise<bigint> {
 // ──────────────────────────────────────────────────────────────────────── kit plumbing
 
 type WebAuthnShim = {
-  startRegistration?: () => Promise<RegistrationResponseJSON>;
-  startAuthentication?: () => Promise<AuthenticationResponseJSON>;
+  startRegistration?: (args: {
+    optionsJSON: { challenge: string };
+  }) => Promise<RegistrationResponseJSON>;
+  /**
+   * Receives the options the kit built so the caller can inspect `challenge` — which is
+   * the auth digest, and the one value that has to agree across the two halves of a tip.
+   */
+  startAuthentication?: (args: {
+    optionsJSON: { challenge: string };
+  }) => Promise<AuthenticationResponseJSON>;
 };
 
 /**
@@ -318,7 +343,7 @@ export function buildKit(options: {
 }): SmartAccountKit {
   const cfg = stellarConfig();
 
-  return new SmartAccountKit({
+  const kit = new SmartAccountKit({
     rpcUrl: cfg.rpcUrl,
     networkPassphrase: cfg.networkPassphrase,
     accountWasmHash: cfg.accountWasmHash,
@@ -328,19 +353,53 @@ export function buildKit(options: {
     rpName: APP_NAME,
     allowedOrigins: cfg.allowedOrigins,
     storage: options.storage,
+    // Configured so the kit builds a relayer client and routes submission through it
+    // rather than through RPC — the shared deployer is sign-only and cannot pay a fee.
+    // The client it builds is then replaced below.
+    relayerUrl: cfg.relayerUrl,
+    // Cast at this one seam. The kit types these against `@simplewebauthn/browser`'s
+    // response shapes; ours are the structural subset we actually read. The payloads are
+    // opaque to us either way — the authenticator produces them and the kit parses them —
+    // so the cast asserts nothing we could check more strictly.
     webAuthn: {
-      startRegistration: async () => {
+      startRegistration: async (args: { optionsJSON: { challenge: string } }) => {
         const shim = options.webAuthn?.startRegistration;
         if (!shim) throw new Error("No WebAuthn registration response was injected.");
-        return await shim();
+        return await shim(args);
       },
-      startAuthentication: async () => {
+      startAuthentication: async (args: { optionsJSON: { challenge: string } }) => {
         const shim = options.webAuthn?.startAuthentication;
         if (!shim) throw new Error("No WebAuthn assertion was injected.");
-        return await shim();
+        return await shim(args);
       },
-    },
+    } as never,
   });
+
+  // Teach the kit's relayer client to authenticate.
+  //
+  // It posts exactly the body OpenZeppelin Channels expects but sends no `Authorization`
+  // header, because it is written for a browser talking to a proxy that holds the key.
+  // Overriding `send` — an own property shadowing the prototype method — lets us keep the
+  // kit's submission path while supplying the header ourselves.
+  //
+  // The alternative was standing up a Convex httpAction as that proxy, which would have
+  // put an internet-facing endpoint in front of a key that pays for transactions. This
+  // keeps the key where it already is and adds no new attack surface.
+  if (kit.relayer) {
+    kit.relayer.send = async (func: string, auth: string[]) => {
+      try {
+        return { success: true, hash: await submitViaRelayer(func, auth) };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+          errorCode: error instanceof RelayerError ? error.relayerCode : undefined,
+        };
+      }
+    };
+  }
+
+  return kit;
 }
 
 /**

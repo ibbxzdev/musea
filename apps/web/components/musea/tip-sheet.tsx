@@ -12,12 +12,7 @@ import Link from "next/link";
 import * as React from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-  EXPECTED_NETWORK,
-  FreighterError,
-  signWithFreighter,
-  useFreighter,
-} from "@/lib/musea/freighter";
+import { PasskeyError, passkeysSupported, signWithPasskey } from "@/lib/musea/passkey";
 import { STELLAR_NETWORK } from "@/lib/musea/stellar";
 import { cn } from "@/lib/utils";
 import { ResponsiveModal } from "./responsive-modal";
@@ -25,13 +20,18 @@ import { ResponsiveModal } from "./responsive-modal";
 /**
  * The one-tap tip flow — the user-facing half of Deliverable 2.
  *
- * Tips are signed by the user's own wallet (Freighter) and land in the **gallery creator's**
- * own wallet. There is no app-managed wallet on either side any more: Musea holds no keys,
- * so it can neither spend for the tipper nor receive on the creator's behalf.
+ * Tips are authorized by the user's own passkey — Face ID or Touch ID — and land in the
+ * **gallery creator's** smart account. Musea holds no keys on either side: it can neither
+ * spend for the tipper nor receive on the creator's behalf.
  *
  * **No Stellar code here.** This component knows a gallery id and an amount string. The
- * server builds and simulates the transaction, the extension signs an opaque XDR string,
- * and the server submits it. That is CLAUDE.md rule 1, and the lint rule is its backstop.
+ * server builds, simulates and assembles the transaction and derives an auth digest; the
+ * device signs those 32 bytes; the server submits. The browser never learns what it signed.
+ * That is CLAUDE.md rule 1, and the lint rule is its backstop.
+ *
+ * **The Face ID call is synchronous inside the tap handler.** Safari consumes user
+ * activation across an `await`, so `prepareTip` has to have returned the challenge before
+ * the user commits — which is why the sheet prepares on open rather than on send.
  *
  * Note what is *not* sent: no user id, no public key, no "from" and no "to". Both ends are
  * derived server-side — the tipper from `ctx.auth`, the recipient from `gallery.ownerId`.
@@ -77,14 +77,13 @@ export function TipButton({
    * wallet with no fallback, so a creator who never connected one cannot receive — and
    * finding that out at the end of the flow is a dead end wearing a working button.
    */
-  const curatorReady = useQuery(api.stellar.external.curatorAcceptsTips, { galleryId });
+  const curatorReady = useQuery(api.stellar.passkey.curatorAcceptsTips, { galleryId });
 
-  const external = useQuery(api.stellar.external.getMyExternalWallet);
-  const freighter = useFreighter();
+  const wallet = useQuery(api.stellar.passkey.getMyWallet);
 
-  const prepareTip = useAction(api.stellar.external.prepareTip);
-  const submitTip = useAction(api.stellar.external.submitTip);
-  const cancelPreparedTip = useMutation(api.stellar.external.cancelPreparedTip);
+  const prepareTip = useAction(api.stellar.tips.prepareTip);
+  const submitTip = useAction(api.stellar.tips.submitTip);
+  const cancelPreparedTip = useMutation(api.stellar.tips.cancelPreparedTip);
 
   const [open, setOpen] = React.useState(false);
   const [amount, setAmount] = React.useState(DEFAULT_AMOUNT);
@@ -96,72 +95,93 @@ export function TipButton({
    */
   const sendingRef = React.useRef(false);
 
+  /**
+   * The prepared tip, fetched when the sheet opens. Send is disabled until it lands — that
+   * wait is what buys a Face ID prompt that actually appears on iPhone Safari.
+   */
+  const [prepared, setPrepared] = React.useState<{
+    tipId: Id<"tips">;
+    challenge: string;
+    credentialId: string;
+    rpId: string;
+  } | null>(null);
+  const [prepareError, setPrepareError] = React.useState<string | null>(null);
+
   const selected = PRESETS.find((preset) => preset.amount === amount) ?? PRESETS[0]!;
 
   // Ordered by whose problem it is: the creator's setup, then the tipper's, then the
-  // extension's. Each names one concrete next step rather than reporting a state.
+  // device's. Each names one concrete next step rather than reporting a state.
   const blocker: Blocker | null =
     curatorReady === false
       ? {
-          reason: `${curatorName ?? "This curator"} hasn't connected a wallet yet, so they can't receive tips.`,
+          reason: `${curatorName ?? "This curator"} hasn't set up a wallet yet, so they can't receive tips.`,
         }
-      : !external
+      : wallet === null || wallet?.status !== "deployed"
         ? {
-            reason: "Connect a wallet to tip.",
+            reason: "Set up your wallet to tip — one tap and Face ID.",
             action: { label: "Go to Profile", href: "/app/profile" },
           }
-        : freighter.state === "unavailable"
-          ? { reason: "Freighter isn't available in this browser. It's a desktop extension." }
-          : freighter.state !== "connected"
-            ? { reason: "Unlock Freighter to sign this tip." }
-            : freighter.wrongNetwork
-              ? {
-                  reason: `Freighter is on ${freighter.network}. Switch it to ${EXPECTED_NETWORK}.`,
-                }
-              : null;
+        : !passkeysSupported()
+          ? { reason: "This browser can't use passkeys. Open Musea in Safari or Chrome." }
+          : null;
 
-  const canSend = !blocker && !sending && curatorReady === true;
+  // Also gated on the challenge having arrived: Safari drops user activation across an
+  // `await`, so Send must not be the thing that goes and fetches it.
+  const canSend = !blocker && !sending && curatorReady === true && prepared !== null;
 
   /**
-   * The tip, in three moves: the server builds and simulates, Freighter signs, the server
-   * submits and polls.
+   * Prepare as soon as the sheet opens, and again whenever the amount changes.
    *
-   * The XDR is opaque here in both directions — this component never learns what a
-   * transaction contains. `submitTip` proves the envelope coming back hashes to the one it
-   * built, so a modified transaction is rejected rather than recorded.
+   * This is the load-bearing bit of the iPhone flow. `prepareTip` builds, simulates and
+   * assembles the transaction and derives the auth digest — hundreds of milliseconds of
+   * network work. Doing it after the Send tap would mean calling
+   * `navigator.credentials.get()` on the far side of an `await`, and Safari has already
+   * dropped user activation by then: no Face ID sheet, no error, nothing.
+   *
+   * So the challenge is in hand before the user commits, and Send is synchronous.
    */
-  const sendTip = async (toastId: string | number): Promise<{ txHash: string }> => {
-    if (!external) throw new FreighterError("WALLET_NOT_CONNECTED");
+  React.useEffect(() => {
+    if (!open || blocker) return;
 
-    const { tipId, xdr } = await prepareTip({ galleryId, amount: selected.amount });
-
-    let signedXdr: string;
-    try {
-      signedXdr = await signWithFreighter(xdr, external.publicKey);
-    } catch (error) {
-      // Nothing was submitted, so the row we just created describes a tip that will never
-      // happen. Release it, or the double-submit guard treats the user's own cancelled
-      // attempt as a tip in flight and refuses their next one for a minute.
-      await cancelPreparedTip({ tipId }).catch(() => {
-        // Cleanup is best-effort; the pending window expires on its own. The signing
-        // failure below is the one the user needs to hear about.
+    let cancelled = false;
+    setPrepared(null);
+    setPrepareError(null);
+    prepareTip({ galleryId, amount: selected.amount })
+      .then((result) => {
+        if (cancelled) {
+          // The sheet closed or the amount changed while this was in flight. Release the
+          // row so the double-submit guard does not treat it as a tip still going through.
+          void cancelPreparedTip({ tipId: result.tipId }).catch(() => {});
+          return;
+        }
+        setPrepared(result);
+      })
+      .catch((error) => {
+        if (!cancelled) setPrepareError(tipErrorMessage(error));
       });
-      throw error;
-    }
 
-    toast.loading("Submitting to Stellar…", { id: toastId });
-    return await submitTip({ tipId, signedXdr });
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [open, blocker, galleryId, selected.amount, prepareTip, cancelPreparedTip]);
 
   const handleConfirm = async () => {
-    if (sendingRef.current) return;
+    if (sendingRef.current || !prepared) return;
     sendingRef.current = true;
     setSending(true);
 
-    const toastId = toast.loading("Waiting for Freighter…");
+    const toastId = toast.loading("Confirm with Face ID…");
 
     try {
-      const { txHash } = await sendTip(toastId);
+      // Synchronous inside the tap handler — the challenge is already here.
+      const assertion = await signWithPasskey({
+        challenge: prepared.challenge,
+        credentialId: prepared.credentialId,
+        rpId: prepared.rpId,
+      });
+
+      toast.loading("Submitting to Stellar…", { id: toastId });
+      const { txHash } = await submitTip({ tipId: prepared.tipId, assertion });
 
       // Close first: the toast is what confirms it, and on a phone a sheet still covering
       // the screen reads as "nothing happened".
@@ -186,9 +206,14 @@ export function TipButton({
       // from anything this component knows.
       onTipped?.();
     } catch (error) {
-      // Declining the wallet popup is a decision, not a failure. Dismiss and leave the
-      // sheet open on the amount they picked, so changing their mind again is one tap.
-      if (error instanceof FreighterError && error.code === "SIGNATURE_REJECTED") {
+      // Nothing was submitted, so the prepared row describes a tip that will never happen.
+      // Release it, or the guard treats the user's own cancelled attempt as one in flight.
+      void cancelPreparedTip({ tipId: prepared.tipId }).catch(() => {});
+      setPrepared(null);
+
+      // Dismissing Face ID is a decision, not a failure: stay on the sheet, on the amount
+      // they picked, so changing their mind again is one tap.
+      if (error instanceof PasskeyError && error.code === "SIGNATURE_REJECTED") {
         toast.dismiss(toastId);
       } else {
         toast.error(tipErrorMessage(error), { id: toastId });
@@ -274,14 +299,27 @@ export function TipButton({
             })}
           </div>
 
-          <SourceLine publicKey={external?.publicKey ?? null} blocker={blocker} />
+          <SourceLine address={wallet?.contractAddress ?? null} blocker={blocker} />
+
+          {/*
+            A tip that cannot be built is refused here, before Face ID rather than after.
+            `prepareTip` simulates, so this catches an insufficient balance or an
+            unreachable curator while the user can still change the amount.
+          */}
+          {prepareError && !blocker ? (
+            <p className="mt-2 text-sm text-destructive">{prepareError}</p>
+          ) : null}
 
           <Button
             onClick={handleConfirm}
             disabled={!canSend}
             className="mt-4 h-12 w-full rounded-full text-base"
           >
-            {sending ? "Sending…" : `Send ${selected.amount} XLM`}
+            {sending
+              ? "Sending…"
+              : !prepared && !blocker
+                ? "Preparing…"
+                : `Send ${selected.amount} XLM`}
           </Button>
 
           {blocker?.action ? (
@@ -302,11 +340,10 @@ export function TipButton({
 /**
  * What the tip will be spent from, or why it cannot be.
  *
- * Deliberately not a balance. We hold no key for this wallet and track no cache for it —
- * its balance is not ours to report, and Freighter shows it at signing time anyway. Naming
- * the address that will be debited is both honest and the more useful thing here.
+ * Names the account that will be debited rather than showing a balance: the balance lives
+ * on the profile, and repeating it here would be a second copy to drift.
  */
-function SourceLine({ publicKey, blocker }: { publicKey: string | null; blocker: Blocker | null }) {
+function SourceLine({ address, blocker }: { address: string | null; blocker: Blocker | null }) {
   if (blocker) {
     return <p className="mt-4 text-sm text-muted-foreground">{blocker.reason}</p>;
   }
@@ -315,9 +352,9 @@ function SourceLine({ publicKey, blocker }: { publicKey: string | null; blocker:
     <p className="mt-4 text-sm text-muted-foreground">
       From{" "}
       <span className="font-mono text-xs font-medium text-foreground">
-        {publicKey ? shorten(publicKey) : "—"}
+        {address ? shorten(address) : "—"}
       </span>{" "}
-      via Freighter
+      with Face ID
     </p>
   );
 }
@@ -332,9 +369,9 @@ function SourceLine({ publicKey, blocker }: { publicKey: string | null; blocker:
  * vocabulary, which must never be shown to someone who just wanted to tip a dollar.
  */
 function tipErrorMessage(error: unknown): string {
-  // Raised in the browser rather than by the backend — the extension is missing, locked,
-  // or on the wrong network — so it carries a code but never came through Convex.
-  if (error instanceof FreighterError) return userMessageFor(error.code);
+  // Raised in the browser rather than by the backend — the device declined, or has no
+  // passkey for this domain — so it carries a code but never came through Convex.
+  if (error instanceof PasskeyError) return userMessageFor(error.code);
 
   if (error instanceof ConvexError) {
     const data = error.data as { code?: TipErrorCode; message?: string } | undefined;

@@ -1,19 +1,111 @@
 import { v } from "convex/values";
-import { action } from "../_generated/server";
+
+import { action, mutation } from "../_generated/server";
 import { internal } from "../_generated/api";
-import { requireCurrentUserIdFromAction } from "../model/auth";
+import type { Id } from "../_generated/dataModel";
+import { requireCurrentUser, requireCurrentUserIdFromAction } from "../model/auth";
 
 /**
- * On-chain tip totals — the public read surface.
- *
- * Sending lives in `./external.ts`: tips are signed by the user's own wallet, so the flow
- * is prepare → sign in the browser → submit, not a single server-side action. The
- * app-managed sending path that used to live here is gone, along with the keys it needed.
+ * Tipping — the public, auth-guarded surface (Stories 2B.3 / 2.5).
  *
  * Auth guards and nothing else; the Stellar work is in `./tipsNode.ts`. No Stellar imports
- * here, so this module stays in the default Convex runtime and its guards are reachable
- * from `convex-test`. Never `import` the node module; go through `internal.stellar.tipsNode.*`.
+ * here, so this module stays in the default Convex runtime and its guards stay reachable
+ * from `convex-test`. Never `import` the node module; go through
+ * `internal.stellar.tipsNode.*`.
+ *
+ * **Nothing here takes a `userId`.** Who is tipping is whoever `ctx.auth` says is calling.
+ * `submitTip` does take a `tipId` — it has to, the browser holds it across the Face ID
+ * prompt — and that is precisely why `getOwnedPendingTip` re-checks ownership server-side.
  */
+
+/**
+ * Step 1 of a tip: build it and hand back a challenge to sign.
+ *
+ * Nothing is spent here and nothing is submitted. The tip is simulated first, so a tip
+ * that cannot succeed is refused before the user is ever asked for their face.
+ *
+ * What comes back is deliberately minimal: an opaque tip id and 32 bytes to sign. The
+ * transaction itself never leaves the server, so there is no envelope for a client to
+ * tamper with and none to re-verify on the way back.
+ */
+export const prepareTip = action({
+  args: {
+    galleryId: v.id("galleries"),
+    /** Display amount, e.g. "5". Converted to stroops server-side. */
+    amount: v.string(),
+  },
+  handler: async (
+    ctx,
+    { galleryId, amount },
+  ): Promise<{ tipId: Id<"tips">; challenge: string; credentialId: string; rpId: string }> => {
+    const fromUserId = await requireCurrentUserIdFromAction(ctx);
+    return await ctx.runAction(internal.stellar.tipsNode.prepareTip, {
+      fromUserId,
+      galleryId,
+      amount,
+    });
+  },
+});
+
+/**
+ * Step 2 of a tip: submit what the device signed.
+ *
+ * `tipId` is client-supplied by necessity — the browser held it across the Face ID prompt.
+ * The node action re-derives that it belongs to this caller and is still pending, and
+ * checks the assertion answers the challenge this tip issued.
+ */
+export const submitTip = action({
+  args: {
+    tipId: v.id("tips"),
+    /** The WebAuthn AuthenticationResponseJSON the device produced. */
+    assertion: v.any(),
+  },
+  handler: async (ctx, { tipId, assertion }): Promise<{ status: "success"; txHash: string }> => {
+    const fromUserId = await requireCurrentUserIdFromAction(ctx);
+    return await ctx.runAction(internal.stellar.tipsNode.submitTip, {
+      fromUserId,
+      tipId,
+      assertion,
+    });
+  },
+});
+
+/**
+ * Release a prepared tip whose signature never arrived.
+ *
+ * `prepareTip` records the tip as `pending` before the device is asked to sign, which also
+ * arms the double-submit guard. A human sits in the middle and can dismiss the Face ID
+ * sheet — and without this, their own cancelled attempt would lock them out of retrying
+ * the same gallery for a full minute, which reads as the app being broken rather than as a
+ * guard doing its job.
+ *
+ * Nothing was submitted at prepare time, so cancelling costs nothing on-chain.
+ *
+ * Best-effort and silent: a tip that is missing, not the caller's, or no longer pending is
+ * simply not cancelled. This runs inside a failure path the user is already being told
+ * about, and a second error about the cleanup would only obscure the first.
+ */
+export const cancelPreparedTip = mutation({
+  args: { tipId: v.id("tips") },
+  returns: v.null(),
+  handler: async (ctx, { tipId }) => {
+    const user = await requireCurrentUser(ctx);
+
+    const tip = await ctx.db.get(tipId);
+    if (!tip || tip.fromUserId !== user._id || tip.status !== "pending") return null;
+
+    await ctx.db.patch(tipId, {
+      status: "failed",
+      errorCode: "SIGNATURE_REJECTED",
+      // Drop the in-flight state with the tip: it is transient, and the XDR is the largest
+      // thing on the row.
+      preparedXdr: undefined,
+      authChallenge: undefined,
+      signatureExpirationLedger: undefined,
+    });
+    return null;
+  },
+});
 
 /**
  * A gallery's total tipped, live from TipJar contract state, in stroops.
@@ -32,12 +124,8 @@ export const getGalleryTotal = action({
 /**
  * The signed-in curator's lifetime total received, from contract state, in stroops.
  *
- * Reads the caller's **connected** wallet, because that is where tips are now paid. It
- * previously read the app-managed account, which under the current model would report 0
- * forever — the contract credits the address that actually received the transfer.
- *
- * Returns "0" for a curator who has not connected a wallet: they have no address for the
- * contract to have credited, which is genuinely a zero rather than a missing answer.
+ * Returns "0" for a curator with no wallet: they have no address for the contract to have
+ * credited, which is genuinely a zero rather than a missing answer.
  *
  * Scoped to the caller rather than taking a `userId`. While a curator total is arguably
  * public, resolving a user id to a Stellar address for any caller hands out a mapping we
@@ -47,12 +135,12 @@ export const getMyCuratorTotal = action({
   args: {},
   handler: async (ctx): Promise<string> => {
     const userId = await requireCurrentUserIdFromAction(ctx);
-    const wallet = await ctx.runQuery(internal.stellar.internal.getExternalWalletByUser, {
+    const account = await ctx.runQuery(internal.stellar.internal.getSmartAccountByUser, {
       userId,
     });
-    if (!wallet) return "0";
+    if (!account || account.status !== "deployed") return "0";
     return await ctx.runAction(internal.stellar.tipsNode.readCuratorTotal, {
-      publicKey: wallet.publicKey,
+      address: account.contractAddress,
     });
   },
 });

@@ -5,11 +5,11 @@ import { internalMutation, internalQuery } from "../_generated/server";
  * Database helpers for the Stellar layer.
  *
  * These run in the DEFAULT Convex runtime (no "use node") — they touch only the database.
- * Actions cannot write to the database, so every persistence step in wallets.ts/tips.ts
+ * Actions cannot write to the database, so every persistence step in passkeyNode.ts/tipsNode.ts
  * goes through one of these.
  *
  * Everything here is `internal*`: none of it is reachable from the client. The public,
- * auth-guarded surfaces are `./tips.ts` and `./external.ts`.
+ * auth-guarded surfaces are `./tips.ts` and `./passkey.ts`.
  */
 
 export const getGallery = internalQuery({
@@ -220,51 +220,29 @@ export const getOwnedPendingTip = internalQuery({
   },
 });
 
+/** The caller's profile row, for the display name shown in the OS passkey sheet. */
+export const getUser = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    return await ctx.db.get(userId);
+  },
+});
+
 /**
- * Link a wallet to the Musea profile behind a Better Auth subject.
+ * Detach a smart account from a Musea profile.
  *
- * The wallet sign-in plugin (convex/model/walletAuth.ts) knows the Better Auth user id,
- * because that is what it just created a session for. It does not know the `users._id`,
- * and it must not take one from the client. This resolves the one from the other.
- *
- * Why link at all: a curator who signed in *with* a wallet has, by construction, proved
- * they hold its key. Making them press "Connect wallet" afterwards to become tippable
- * would be asking for the same proof twice. Signing in is the connection.
- *
- * Returns false when no profile row exists yet rather than throwing. The session is
- * already created by the time this runs, so a failure here must not read as a failed
- * sign-in — the user is signed in, just not yet tippable, and the connect-wallet flow in
- * the app is the recovery path.
+ * Deletes the row and nothing else. The account stays deployed on-chain with its balance
+ * intact and the passkey stays in the device's Secure Enclave — neither is ours to destroy.
+ * Registering again on the same device derives the same contract address, so this is
+ * reversible by construction.
  */
-export const linkExternalWalletByAuthSubject = internalMutation({
-  args: { authSubject: v.string(), publicKey: v.string(), network: v.string() },
-  handler: async (ctx, { authSubject, publicKey, network }): Promise<boolean> => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_authSubject", (q) => q.eq("authSubject", authSubject))
-      .unique();
-    if (!user) return false;
-
+export const deleteSmartAccount = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
     const existing = await ctx.db
-      .query("externalWallets")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .query("smartAccounts")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
-
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        publicKey,
-        network: network.toUpperCase(),
-        linkedAt: Date.now(),
-      });
-      return true;
-    }
-
-    await ctx.db.insert("externalWallets", {
-      userId: user._id,
-      publicKey,
-      network: network.toUpperCase(),
-      linkedAt: Date.now(),
-    });
-    return true;
+    if (existing) await ctx.db.delete(existing._id);
   },
 });

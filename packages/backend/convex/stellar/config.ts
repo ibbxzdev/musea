@@ -102,8 +102,7 @@ export function stellarConfig(): StellarConfig {
     // the common mistake and the right answer is mechanical: localhost is http, everything
     // else is https. Override only for an origin that is neither.
     allowedOrigins: (
-      process.env.WEBAUTHN_ALLOWED_ORIGINS?.trim() ||
-      defaultOriginFor(required("WEBAUTHN_RP_ID"))
+      process.env.WEBAUTHN_ALLOWED_ORIGINS?.trim() || defaultOriginFor(required("WEBAUTHN_RP_ID"))
     )
       .split(",")
       .map((origin) => origin.trim())

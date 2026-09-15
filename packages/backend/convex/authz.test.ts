@@ -44,19 +44,25 @@ async function seedTwoUsersAndATip(t: ReturnType<typeof convexTest>) {
       createdAt: Date.now(),
     });
 
-    await ctx.db.insert("externalWallets", {
+    // Alice has a deployed smart account; Bob deliberately does not. Every "can B see A's
+    // wallet" case below depends on exactly one of them having one.
+    await ctx.db.insert("smartAccounts", {
       userId: alice,
-      publicKey: "GALICE",
-      network: "TESTNET",
-      linkedAt: Date.now(),
+      contractAddress: "CALICE",
+      credentialId: "cred-alice",
+      publicKeyHex: "04aa",
+      rpId: "musea-tips.vercel.app",
+      status: "deployed",
+      funded: true,
+      createdAt: Date.now(),
     });
 
     const tip = await ctx.db.insert("tips", {
       fromUserId: alice,
       toUserId: bob,
       galleryId: gallery,
-      fromPublicKey: "GALICE",
-      toPublicKey: "GBOB",
+      fromPublicKey: "CALICE",
+      toPublicKey: "CBOB",
       galleryHashHex: "deadbeef",
       amountStroops: "50000000",
       status: "failed",
@@ -126,7 +132,7 @@ describe("tip entry points require a session", () => {
     const { gallery } = await seedTwoUsersAndATip(t);
 
     await expect(
-      t.action(api.stellar.external.prepareTip, { galleryId: gallery, amount: "5" }),
+      t.action(api.stellar.tips.prepareTip, { galleryId: gallery, amount: "5" }),
     ).rejects.toThrow("Not signed in.");
   });
 
@@ -135,18 +141,25 @@ describe("tip entry points require a session", () => {
     const { tip } = await seedTwoUsersAndATip(t);
 
     await expect(
-      t.action(api.stellar.external.submitTip, { tipId: tip, signedXdr: "AAAA" }),
+      t.action(api.stellar.tips.submitTip, { tipId: tip, assertion: {} }),
     ).rejects.toThrow("Not signed in.");
   });
 
-  test("linkWallet refuses an anonymous caller", async () => {
+  test("startRegistration refuses an anonymous caller", async () => {
+    // Provisioning spends treasury funds and mints an account bound to a user. An
+    // anonymous caller reaching it would create wallets nobody owns.
+    const t = convexTest(schema, modules);
+
+    await expect(t.action(api.stellar.passkey.startRegistration, {})).rejects.toThrow(
+      "Not signed in.",
+    );
+  });
+
+  test("finishRegistration refuses an anonymous caller", async () => {
     const t = convexTest(schema, modules);
 
     await expect(
-      t.mutation(api.stellar.external.linkWallet, {
-        publicKey: "GDEKT6A4WVXRKAL2SV3UYRHA63PZ3KJARPZ4GMZNTZCHTMAZEEEUOJAD",
-        network: "TESTNET",
-      }),
+      t.action(api.stellar.passkey.finishRegistration, { registrationResponse: {} }),
     ).rejects.toThrow("Not signed in.");
   });
 
@@ -158,31 +171,31 @@ describe("tip entry points require a session", () => {
     const stranger = t.withIdentity({ subject: "auth|no-profile" });
 
     await expect(
-      stranger.action(api.stellar.external.prepareTip, { galleryId: gallery, amount: "5" }),
+      stranger.action(api.stellar.tips.prepareTip, { galleryId: gallery, amount: "5" }),
     ).rejects.toThrow("Not signed in.");
   });
 });
 
-describe("getMyExternalWallet exposes only the caller's own wallet", () => {
-  test("the caller sees their own connected address", async () => {
+describe("getMyWallet exposes only the caller's own smart account", () => {
+  test("the caller sees their own account", async () => {
     const t = convexTest(schema, modules);
     await seedTwoUsersAndATip(t);
 
     const wallet = await t
       .withIdentity({ subject: ALICE })
-      .query(api.stellar.external.getMyExternalWallet, {});
+      .query(api.stellar.passkey.getMyWallet, {});
 
-    expect(wallet?.publicKey).toBe("GALICE");
+    expect(wallet?.contractAddress).toBe("CALICE");
   });
 
-  test("a second user does not see the first user's wallet", async () => {
-    // Bob has connected nothing. The answer must be "you have none", never Alice's.
+  test("a second user does not see the first user's account", async () => {
+    // Bob has no wallet. The answer must be "you have none", never Alice's.
     const t = convexTest(schema, modules);
     await seedTwoUsersAndATip(t);
 
-    expect(
-      await t.withIdentity({ subject: BOB }).query(api.stellar.external.getMyExternalWallet, {}),
-    ).toBe(null);
+    expect(await t.withIdentity({ subject: BOB }).query(api.stellar.passkey.getMyWallet, {})).toBe(
+      null,
+    );
   });
 
   test("signed out is null, not an error", async () => {
@@ -191,7 +204,21 @@ describe("getMyExternalWallet exposes only the caller's own wallet", () => {
     const t = convexTest(schema, modules);
     await seedTwoUsersAndATip(t);
 
-    expect(await t.query(api.stellar.external.getMyExternalWallet, {})).toBe(null);
+    expect(await t.query(api.stellar.passkey.getMyWallet, {})).toBe(null);
+  });
+
+  test("no credential id is ever serialized to the client", async () => {
+    // The credential id is public by construction, but it is also the handle a device uses
+    // to select a passkey. Nothing in the UI needs it outside a signing round trip, so the
+    // projection deliberately omits it — asserted here so a later spread cannot add it back.
+    const t = convexTest(schema, modules);
+    await seedTwoUsersAndATip(t);
+
+    const wallet = await t
+      .withIdentity({ subject: ALICE })
+      .query(api.stellar.passkey.getMyWallet, {});
+
+    expect(JSON.stringify(wallet)).not.toContain("cred-alice");
   });
 });
 
@@ -217,7 +244,7 @@ describe("a prepared tip can only be cancelled by the user it belongs to", () =>
       }),
     );
 
-    await t.withIdentity({ subject: BOB }).mutation(api.stellar.external.cancelPreparedTip, {
+    await t.withIdentity({ subject: BOB }).mutation(api.stellar.tips.cancelPreparedTip, {
       tipId: pending,
     });
 
@@ -244,7 +271,7 @@ describe("a prepared tip can only be cancelled by the user it belongs to", () =>
       }),
     );
 
-    await t.withIdentity({ subject: ALICE }).mutation(api.stellar.external.cancelPreparedTip, {
+    await t.withIdentity({ subject: ALICE }).mutation(api.stellar.tips.cancelPreparedTip, {
       tipId: pending,
     });
 
@@ -261,7 +288,7 @@ describe("prepareTip takes no caller-supplied identity", () => {
     const { gallery, bob } = await seedTwoUsersAndATip(t);
 
     await expect(
-      t.withIdentity({ subject: ALICE }).action(api.stellar.external.prepareTip, {
+      t.withIdentity({ subject: ALICE }).action(api.stellar.tips.prepareTip, {
         galleryId: gallery,
         amount: "5",
         fromUserId: bob,
