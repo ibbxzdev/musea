@@ -124,6 +124,44 @@ describe("tip history is scoped to the caller", () => {
     // to the shape cannot reintroduce the leak without failing here.
     expect(JSON.stringify(rows)).not.toContain("envelope_xdr");
   });
+
+  /**
+   * A dismissed Face ID prompt is not history.
+   *
+   * `cancelPreparedTip` writes the abandoned attempt as failed/SIGNATURE_REJECTED only to
+   * release the double-submit guard — nothing was built, signed or submitted. The pairing
+   * with the assertion above is the point of this test: a *real* failure stays in the feed,
+   * so the filter cannot quietly widen into "hide anything that did not succeed".
+   */
+  test("an attempt abandoned at Face ID is not a history row, but a real failure is", async () => {
+    const t = convexTest(schema, modules);
+    const { alice, bob, gallery } = await seedTwoUsersAndATip(t);
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("tips", {
+        fromUserId: alice,
+        toUserId: bob,
+        galleryId: gallery,
+        fromPublicKey: "CALICE",
+        toPublicKey: "CBOB",
+        galleryHashHex: "deadbeef",
+        amountStroops: "10000000",
+        status: "failed",
+        errorCode: "SIGNATURE_REJECTED",
+        createdAt: Date.now() + 1,
+      });
+    });
+
+    const sent = await t.withIdentity({ subject: ALICE }).query(api.tips.listMyTips, {});
+    const received = await t.withIdentity({ subject: BOB }).query(api.tips.listMyTips, {});
+
+    // The cancelled attempt is the newer of the two rows, so a broken filter shows up here
+    // as a length of 2 rather than as a subtly wrong ordering.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.errorCode).toBe("NO_TRUSTLINE");
+    expect(received).toHaveLength(1);
+    expect(received[0]?.errorCode).toBe("NO_TRUSTLINE");
+  });
 });
 
 describe("tip entry points require a session", () => {

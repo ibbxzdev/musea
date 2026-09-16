@@ -24,10 +24,17 @@ import { AddArtifactModal } from "./add-artifact";
  * looks like a tab bar because that is the right affordance — it just isn't one.
  */
 
+/**
+ * Activity sits next to Community because that is where tipping happens — you tip from a
+ * gallery that is not yours, and the receipt for it is one section along. At 390px five
+ * labels are wider than the screen, which is what the rail's `overflow-x-auto` is for:
+ * the last one scrolls into reach rather than wrapping the header to two lines.
+ */
 const SECTIONS = [
   { href: "/app/artifacts", label: "Artifacts" },
   { href: "/app/galleries", label: "Galleries" },
   { href: "/app/community", label: "Community" },
+  { href: "/app/activity", label: "Activity" },
   { href: "/app/profile", label: "Profile" },
 ] as const;
 

@@ -40,3 +40,13 @@ export type ArtifactStatus = Artifact["status"];
 
 /** A curator, reduced to what a visitor is allowed to see. */
 export type Curator = NonNullable<GalleryCard["owner"]>;
+
+/**
+ * One row of the Activity feed — a tip the viewer sent or received.
+ *
+ * `direction` is resolved server-side against the caller, so the same tip is "sent" to one
+ * party and "received" by the other. `errorDetail` is not in this shape and must not be:
+ * it holds raw RPC output for debugging, and `convex/tips.ts` builds the projection
+ * field-by-field to keep it that way.
+ */
+export type Tip = FunctionReturnType<typeof api.tips.listMyTips>[number];

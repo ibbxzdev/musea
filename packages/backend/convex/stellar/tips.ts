@@ -116,7 +116,8 @@ export const cancelPreparedTip = mutation({
  */
 export const getGalleryTotal = action({
   args: { galleryId: v.id("galleries") },
-  handler: async (ctx, { galleryId }): Promise<string> => {
+  returns: v.object({ stroops: v.string(), contractId: v.string() }),
+  handler: async (ctx, { galleryId }): Promise<{ stroops: string; contractId: string }> => {
     return await ctx.runAction(internal.stellar.tipsNode.readGalleryTotal, { galleryId });
   },
 });
@@ -124,8 +125,15 @@ export const getGalleryTotal = action({
 /**
  * The signed-in curator's lifetime total received, from contract state, in stroops.
  *
- * Returns "0" for a curator with no wallet: they have no address for the contract to have
- * credited, which is genuinely a zero rather than a missing answer.
+ * This is the second number in the app that comes off the chain rather than out of our
+ * tables, and it is the one the Activity page leads with — so the list of tips underneath
+ * it is checkable against contract state rather than merely asserted by us. TipJar has
+ * exposed `curator_total` since Deliverable 1; until now nothing read it.
+ *
+ * A curator with no deployed wallet gets `{ stroops: "0", contractId: null }`: there is no
+ * address for the contract to have credited, so the zero is a real answer — but there is
+ * also nothing on-chain to link to, and saying so beats pointing at a contract that has
+ * never heard of them.
  *
  * Scoped to the caller rather than taking a `userId`. While a curator total is arguably
  * public, resolving a user id to a Stellar address for any caller hands out a mapping we
@@ -133,12 +141,13 @@ export const getGalleryTotal = action({
  */
 export const getMyCuratorTotal = action({
   args: {},
-  handler: async (ctx): Promise<string> => {
+  returns: v.object({ stroops: v.string(), contractId: v.union(v.string(), v.null()) }),
+  handler: async (ctx): Promise<{ stroops: string; contractId: string | null }> => {
     const userId = await requireCurrentUserIdFromAction(ctx);
     const account = await ctx.runQuery(internal.stellar.internal.getSmartAccountByUser, {
       userId,
     });
-    if (!account || account.status !== "deployed") return "0";
+    if (!account || account.status !== "deployed") return { stroops: "0", contractId: null };
     return await ctx.runAction(internal.stellar.tipsNode.readCuratorTotal, {
       address: account.contractAddress,
     });

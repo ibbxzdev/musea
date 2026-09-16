@@ -468,9 +468,20 @@ function classifyKitFailure(error: { code?: unknown; message?: string } | undefi
 
 // ────────────────────────────────────────────────────────────────── contract reads
 
+/**
+ * A total read off the chain, and the contract it was read from.
+ *
+ * The pair travels together on purpose. The UI links each on-chain number to the contract
+ * on Stellar Expert so a reviewer can check it, and a link built from a separately-sourced
+ * address could point at a *different* contract than the one that served the number —
+ * which is exactly the kind of quiet mismatch that makes a demo's central claim false.
+ * Both halves come from the same `stellarConfig()` read, in the same call.
+ */
+export type ContractTotal = { stroops: string; contractId: string };
+
 export const readGalleryTotal = internalAction({
   args: { galleryId: v.id("galleries") },
-  handler: async (_ctx, { galleryId }): Promise<string> => {
+  handler: async (_ctx, { galleryId }): Promise<ContractTotal> => {
     return await simulateRead(
       "gallery_total",
       StellarSdk.xdr.ScVal.scvBytes(galleryHash(galleryId)),
@@ -481,12 +492,12 @@ export const readGalleryTotal = internalAction({
 /** A curator's lifetime total received, from contract state, in stroops. */
 export const readCuratorTotal = internalAction({
   args: { address: v.string() },
-  handler: async (_ctx, { address }): Promise<string> => {
+  handler: async (_ctx, { address }): Promise<ContractTotal> => {
     return await simulateRead("curator_total", StellarSdk.Address.fromString(address).toScVal());
   },
 });
 
-async function simulateRead(method: string, arg: StellarSdk.xdr.ScVal): Promise<string> {
+async function simulateRead(method: string, arg: StellarSdk.xdr.ScVal): Promise<ContractTotal> {
   const cfg = stellarConfig();
   const rpc = new StellarSdk.rpc.Server(cfg.rpcUrl);
 
@@ -517,8 +528,10 @@ async function simulateRead(method: string, arg: StellarSdk.xdr.ScVal): Promise<
     );
   }
 
-  if (!sim.result) return "0";
-  return (StellarSdk.scValToNative(sim.result.retval) as bigint).toString();
+  const stroops = sim.result
+    ? (StellarSdk.scValToNative(sim.result.retval) as bigint).toString()
+    : "0";
+  return { stroops, contractId: cfg.tipjarContractId };
 }
 
 /**

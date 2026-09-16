@@ -10,6 +10,7 @@ per-gallery tip totals on-chain. 30-day Instaward scope.
 | `docs/Musea_Instawards_SOW.md` | What was promised, what is explicitly out of scope, the budget. **v3 — read the version banner** |
 | `docs/Musea_Stellar_Implementation_Spec.md` | Reference implementation, file by file. Written against SOW v1 — §6 is being rewritten; the SOW wins on any disagreement |
 | `docs/stories/` | The work, broken into ordered stories |
+| `docs/evidence.md` | **Every deployed address and transaction hash, with a link each.** The canonical list — CLAUDE.md and the story docs abbreviate, this does not. Read off the chain, not the database |
 | `docs/Musea_App_Port.md` | The Musea app itself — what was ported from iOS, what was dropped, and six findings. Read before touching `convex/artifacts*`, `convex/galleries*` or `app/app/` |
 | `docs/archive/` | Superseded SOW drafts, kept verbatim. Historical only — never build from these |
 
@@ -130,6 +131,8 @@ packages/backend/         Convex deployment
   convex/stellar/diagnostics.ts error unwrapping + the DEBUG_ERRORS switch
   convex/stellar/config.ts      env validation — every Stellar env var is read here
   convex/stellar/internal.ts    default-runtime DB helpers (actions cannot write)
+  convex/tips.ts                `listMyTips` — the Activity feed. A reactive query, not an
+                                action; the only DB-sourced tip surface in the app
 apps/web/lib/musea/passkey.ts   the browser's entire crypto role. No Stellar imports.
 packages/shared/          Pure TS used by both sides: stroop math, error map, links
 packages/typescript-config/, packages/eslint-config/
@@ -175,21 +178,23 @@ second signer.
 | Monorepo, configs, lint rules, CI-able task graph | Done |
 | `packages/shared` stroop math + error map | Done, tested. Carries the passkey and relayer codes |
 | Convex schema, auth guards, DB helpers, config validation | Done; codegen run, typechecks against a live dev deployment |
-| `contracts/tipjar/` | **Done. Redeployed for the XLM cutover** — the token is a constructor arg, so only the binding changed. 10/10 tests, clippy clean, deployed `CCZPKSRP…` bound to the native SAC `CDLZFC3S…`, sample tip `762d5d84…`, and a zero-trustline recipient proved at `d0eb9b53…`. The old USDC deployment `CAIH6NCC…` is retired |
+| `contracts/tipjar/` | **Done. Redeployed for the XLM cutover** — the token is a constructor arg, so only the binding changed. 10/10 tests, clippy clean, deployed `CCZPKSRPIFDHH4L33WQS3JF2GS5OS4FASCDXHSNGDRDCDTZXFB7DPZAP` bound to the native SAC `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`, sample tip `762d5d84…`, and a zero-trustline recipient proved at `d0eb9b53…`. The old USDC deployment `CAIH6NCC…` is retired. **Full hashes: [`docs/evidence.md`](docs/evidence.md)** |
 | `convex/auth.ts` + `auth.config.ts` Better Auth wiring | Done. Email and password, the only way in. The SEP-0010 wallet sign-in plugin and its `/stellar/*` rate-limit rule are deleted with Freighter |
 | Musea app (artifacts, galleries, filing, profile) | Done and on a live dev deployment. Ported from the iOS repo; 41 backend tests, `convex-authz` clean |
 | Passkey smart account, WebAuthn, relayer | **Done and proven on a real iPhone.** Deployed gaslessly through OpenZeppelin Channels, funded through the native SAC. See Epic 2B below |
 | `convex/stellar/tipsNode.ts` | **Done.** prepare → device signs → submit, all gasless. The transaction never leaves the server; only a 32-byte challenge does |
-| Tipping UI — tip sheet, balance chip, gallery total | **Done and working** (Stories 3.2/3.3/3.5), rewired onto the passkey actions. The badge reads contract state |
-| Activity page, iPhone device pass, **deploy** | Device pass **done** (Story 3.6). Activity page (3.4) not started. Deployed on Vercel at `musea-tips.vercel.app` |
+| Tipping UI — tip sheet, balance chip, gallery total | **Done and working** (Stories 3.2/3.3/3.5), rewired onto the passkey actions. The badge reads contract state and links to the contract |
+| Activity page, iPhone device pass, **deploy** | All **done**. Activity (3.4) at `/app/activity` — receipts linked to Stellar Expert, led by the on-chain `curator_total`. Device pass done for the passkey path; `/app/activity` itself has not been opened on a device. Deployed on Vercel at `musea-tips.vercel.app` |
+| Evidence bundle | **Done** — [`docs/evidence.md`](docs/evidence.md). Every address and hash, read off the chain via `getEvents` rather than out of the `tips` table |
 
 **Deliverable 2 is proven end to end on hardware.** A passkey-signed tip of 5 XLM landed
 at `182571fe…baab6ab`, from smart account `CATDEQEY…` to `CAR7AU4R…`, authorized by Face
 ID on an iPhone in Safari and submitted gaslessly — the user paid no fee and holds no
 classic account. Both ends are `C…` contracts.
 
-What is *not* proven: the Activity page (not built), and anything on mainnet (out of
-scope, permanently).
+What is *not* proven: the Activity page **on a device** (it is built, typechecks and
+prerenders, but nobody has opened `/app/activity` on a physical iPhone), the demo video
+(not recorded), and anything on mainnet (out of scope, permanently).
 
 **The Musea app is a port, not a rewrite.** `github.com/ibo-najjar/Musea` is the iOS
 original and is the reference for behaviour. What was deliberately left out, and must stay

@@ -30,16 +30,28 @@ export const listMyTips = query({
     // Two indexes rather than one scan: `by_from` and `by_to` are each ordered by
     // createdAt, so taking `limit` from each and merging gives the true newest `limit`
     // overall without reading the whole table.
+    //
+    // The `.filter()` refines a read the index has already bounded — it is not standing in
+    // for a WHERE across the table — and it drops one specific row: an attempt the user
+    // abandoned at the Face ID prompt. `cancelPreparedTip` writes those as `failed` /
+    // `SIGNATURE_REJECTED` purely to release the double-submit guard; nothing was built,
+    // signed or submitted. Leaving them in would fill a curator's Activity feed with
+    // "Tip cancelled" rows every time someone changed their mind, which is noise about a
+    // decision rather than a record of anything that happened. Real failures — a rejected
+    // transfer, an unreachable relayer — stay: those *are* history, and hiding them would
+    // make the feed a rosier account than the chain gives.
     const [sent, received] = await Promise.all([
       ctx.db
         .query("tips")
         .withIndex("by_from", (q) => q.eq("fromUserId", user._id))
         .order("desc")
+        .filter((q) => q.neq(q.field("errorCode"), "SIGNATURE_REJECTED"))
         .take(take),
       ctx.db
         .query("tips")
         .withIndex("by_to", (q) => q.eq("toUserId", user._id))
         .order("desc")
+        .filter((q) => q.neq(q.field("errorCode"), "SIGNATURE_REJECTED"))
         .take(take),
     ]);
 
