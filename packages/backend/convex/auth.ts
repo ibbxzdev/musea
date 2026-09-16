@@ -117,11 +117,16 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
     emailAndPassword: { enabled: false },
 
     /**
-     * Required for `auth.api.deleteUser` in convex/users.ts to do anything. Without it
-     * Better Auth refuses the call, and "Delete account" fails after this app's own
-     * cascade has already run — leaving an account with nothing in it.
+     * **Account deletion is off**, at the project owner's direction. The profile UI and the
+     * `users.deleteAccount` mutation that called `auth.api.deleteUser` are both removed, so
+     * nothing reaches this any more — and Better Auth exposes its own `/delete-user`
+     * endpoint when this is enabled, which would otherwise stay live and reachable with no
+     * UI in front of it and no cascade behind it. That is strictly worse than the feature
+     * being gone: it would delete the Better Auth user and leave every artifact, gallery,
+     * upload, passkey credential and wallet row behind, owned by a profile the `onDelete`
+     * trigger had just removed.
      */
-    user: { deleteUser: { enabled: true } },
+    user: { deleteUser: { enabled: false } },
 
     /**
      * Rate limiting, with one deliberate departure from the defaults.

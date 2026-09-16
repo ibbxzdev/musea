@@ -2,15 +2,7 @@
 
 import { api } from "@musea/backend/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import {
-  AtSign,
-  ChevronRight,
-  Loader2,
-  LogOut,
-  type LucideIcon,
-  UserRoundMinus,
-  UserRoundPen,
-} from "lucide-react";
+import { AtSign, ChevronRight, Loader2, LogOut, type LucideIcon, UserRoundPen } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -38,7 +30,6 @@ export function ProfileView() {
   const stats = useQuery(api.users.stats, {});
 
   const [editing, setEditing] = React.useState(false);
-  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
 
   if (viewer === undefined || viewer === null) {
     return (
@@ -68,13 +59,16 @@ export function ProfileView() {
         )}
       </header>
 
-      <dl className="mt-6 grid grid-cols-3 gap-2">
+      <dl className="mt-6 grid grid-cols-2 gap-2">
         <Stat label="Saves" value={stats?.saves} />
         <Stat label="Galleries" value={stats?.galleries} />
-        <Stat label="Tags" value={stats?.tags} />
       </dl>
 
-      <WalletCard />
+      {/* The stats are a tight row of tiles and the wallet is a card of its own; without
+          this they butt together and read as one block. */}
+      <div className="mt-4">
+        <WalletCard />
+      </div>
 
       <SettingsGroup label="Account">
         <SettingsRow
@@ -90,20 +84,10 @@ export function ProfileView() {
           than one that plainly shows what your handle is.
         */}
         <SettingsRow icon={AtSign} label="Username" detail={`@${viewer.handle}`} />
-      </SettingsGroup>
-
-      <SettingsGroup label="Danger">
         <SignOutRow />
-        <SettingsRow
-          icon={UserRoundMinus}
-          label="Delete account"
-          destructive
-          onClick={() => setConfirmingDelete(true)}
-        />
       </SettingsGroup>
 
       <EditProfileModal viewer={viewer} open={editing} onOpenChange={setEditing} />
-      <DeleteAccountModal open={confirmingDelete} onOpenChange={setConfirmingDelete} />
     </div>
   );
 }
@@ -201,81 +185,6 @@ function EditProfileModal({
             className="h-11 w-full rounded-full"
           >
             {saving ? <Loader2 className="size-4 animate-spin" /> : "Save changes"}
-          </Button>
-        </div>
-      </form>
-    </ResponsiveModal>
-  );
-}
-
-/**
- * Type-to-confirm rather than an "Are you sure?" — this deletes every artifact and
- * gallery the account has, and the backend cannot put them back.
- */
-function DeleteAccountModal({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const deleteAccount = useMutation(api.users.deleteAccount);
-
-  const [confirmation, setConfirmation] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (confirmation.trim().toLowerCase() !== "delete" || busy) return;
-
-    setBusy(true);
-    try {
-      await deleteAccount({});
-      // Same reasoning as sign-out, and more pressing: the account is gone, so any
-      // surviving in-memory token now authenticates as a user who does not exist.
-      leaveAuthenticatedApp();
-    } catch {
-      toast.error("Could not delete the account.");
-      setBusy(false);
-    }
-  };
-
-  return (
-    <ResponsiveModal
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Delete account"
-      description="Every artifact and gallery goes with it. This cannot be undone."
-    >
-      <form onSubmit={submit} className="flex flex-col">
-        <div className="space-y-3 px-5 pb-4 sm:px-6">
-          <p className="text-sm text-muted-foreground text-pretty">
-            Your saves, your galleries and the files you uploaded are deleted permanently. Tips you
-            have already sent or received stay on the Stellar ledger — nothing here can unsend
-            those.
-          </p>
-          <div className="space-y-1.5">
-            <Label htmlFor="delete-confirm">
-              Type <span className="font-semibold">delete</span> to confirm
-            </Label>
-            <Input
-              id="delete-confirm"
-              value={confirmation}
-              onChange={(event) => setConfirmation(event.target.value)}
-              className="h-11"
-              autoComplete="off"
-            />
-          </div>
-        </div>
-
-        <div className="pb-safe sticky bottom-0 border-t bg-background/95 px-5 pt-3 backdrop-blur sm:px-6">
-          <Button
-            type="submit"
-            variant="destructive"
-            disabled={confirmation.trim().toLowerCase() !== "delete" || busy}
-            className="h-11 w-full rounded-full"
-          >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : "Delete my account"}
           </Button>
         </div>
       </form>

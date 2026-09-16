@@ -66,8 +66,18 @@ export function MuseaShell({ children }: { children: React.ReactNode }) {
 
           {/* Below lg the rail lives in the header. A 10rem vertical rail would eat a
               quarter of a 390px screen. */}
+          {/*
+            `-mx-5 px-5` is what makes the rail scroll edge to edge.
+
+            The scroller used to sit inside the header's own `px-5`, so its viewport
+            stopped 20px short of each screen edge: a label being scrolled past vanished
+            early, against a strip of empty padding, which reads as clipping rather than
+            scrolling. Cancelling the padding with a negative margin and re-applying it
+            *inside* the scroller keeps the first and last items aligned with the title
+            above while letting the travel run to the real edge.
+          */}
           {!isDesktop && (
-            <SectionNav className="w-full justify-start gap-4 overflow-x-auto pb-2 scrollbar-none" />
+            <SectionNav className="-mx-5 w-auto justify-start gap-4 overflow-x-auto px-5 pb-2 scrollbar-none" />
           )}
         </div>
       </header>
@@ -103,7 +113,14 @@ function SectionNav({ className }: { className?: string }) {
             aria-current={active ? "page" : undefined}
             className={cn(
               // h-11 keeps every target on the 44px grid on touch.
-              "inline-flex h-11 flex-none items-center rounded-md px-1 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none lg:px-3",
+              //
+              // Rounding is `lg:` only. The corner radius applies to the border box, so a
+              // rounded element with `border-b-2` gets an underline that curls up at both
+              // ends — it stops reading as a rule under the word and starts reading as the
+              // bottom of a box that lost its other three sides. The desktop rail is a
+              // filled pill and genuinely wants the radius; the mobile rail is an
+              // underline and must be square.
+              "inline-flex h-11 flex-none items-center px-1 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none lg:rounded-md lg:px-3",
               active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
               // The underline is the mobile rail's active mark; the desktop rail uses a
               // filled pill instead, because a vertical list of underlines reads as links.
