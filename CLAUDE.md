@@ -81,6 +81,7 @@ account's contract address and the passkey credential id, both public by constru
 | Stellar SDK | `@stellar/stellar-sdk` (backend only) | **16.3.0 — pinned, see below** |
 | Smart wallet | `smart-account-kit` (WebAuthn half in the browser; rest server-side) | 0.8.0 |
 | WebAuthn (browser) | `@simplewebauthn/browser` | 13.x |
+| WebAuthn (server, sign-in only) | `@simplewebauthn/server` | **13.3.3 — keep in step with the browser half** |
 | Gasless submission | OpenZeppelin Relayer / Stellar Channels — `https://channels.openzeppelin.com/testnet` (keys at `/gen`) | live |
 | Contract | Rust + `soroban-sdk` | 27.0.6 |
 | Runtime | Node | 22+ (built on 24) |
@@ -123,6 +124,11 @@ packages/backend/         Convex deployment
   convex/galleryArtifacts.ts  the artifact <-> gallery join
   convex/linkPreview.ts     "use node": oEmbed + Open Graph enrichment. No AI.
   convex/files.ts           uploads, and the record of who uploaded what
+  convex/model/passkeyAuth.ts   Better Auth plugin: the four /passkey/* sign-in endpoints
+  convex/passkeys.ts            credential DB helpers + scheduled wallet provisioning
+  convex/stellar/passkeyAuthNode.ts "use node": @simplewebauthn/server — the ONLY thing
+                                standing between a stranger and an account. Not the same
+                                job as passkeyNode.ts, which verifies nothing
   convex/stellar/passkey.ts     auth-guarded surface: getMyWallet, start/finishRegistration
   convex/stellar/passkeyNode.ts "use node": Smart Account Kit, provisioning, funding, balance
   convex/stellar/tips.ts        auth-guarded surface: prepareTip, submitTip, totals
@@ -179,7 +185,7 @@ second signer.
 | `packages/shared` stroop math + error map | Done, tested. Carries the passkey and relayer codes |
 | Convex schema, auth guards, DB helpers, config validation | Done; codegen run, typechecks against a live dev deployment |
 | `contracts/tipjar/` | **Done. Redeployed for the XLM cutover** — the token is a constructor arg, so only the binding changed. 10/10 tests, clippy clean, deployed `CCZPKSRPIFDHH4L33WQS3JF2GS5OS4FASCDXHSNGDRDCDTZXFB7DPZAP` bound to the native SAC `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`, sample tip `762d5d84…`, and a zero-trustline recipient proved at `d0eb9b53…`. The old USDC deployment `CAIH6NCC…` is retired. **Full hashes: [`docs/evidence.md`](docs/evidence.md)** |
-| `convex/auth.ts` + `auth.config.ts` Better Auth wiring | Done. Email and password, the only way in. The SEP-0010 wallet sign-in plugin and its `/stellar/*` rate-limit rule are deleted with Freighter |
+| `convex/auth.ts` + `auth.config.ts` Better Auth wiring | Done. **Passkey sign-in is the only way in — email and password are disabled.** `convex/model/passkeyAuth.ts` is a hand-written Better Auth plugin (the official `passkey` plugin needs a table the Convex component's fixed schema does not have) |
 | Musea app (artifacts, galleries, filing, profile) | Done and on a live dev deployment. Ported from the iOS repo; 41 backend tests, `convex-authz` clean |
 | Passkey smart account, WebAuthn, relayer | **Done and proven on a real iPhone.** Deployed gaslessly through OpenZeppelin Channels, funded through the native SAC. See Epic 2B below |
 | `convex/stellar/tipsNode.ts` | **Done.** prepare → device signs → submit, all gasless. The transaction never leaves the server; only a 32-byte challenge does |
@@ -223,14 +229,44 @@ the only remaining precondition on either side is that the account exists on the
 
 ## The passkey wallet
 
-One way in, one way to sign, and they are different things.
+**One Face ID enrolment, two jobs.** The same credential signs you in and authorizes tips.
+There is no password anywhere in the product.
 
-**Signing in** is email and password, via Better Auth. It works on every device, which is
-why it is the only option — the SEP-0010 wallet sign-in is deleted along with Freighter.
+**Signing in** is WebAuthn, via `convex/model/passkeyAuth.ts` — a hand-written Better Auth
+plugin. Email and password are disabled in `convex/auth.ts` and are not coming back;
+`e32deb4` said email had to stay "until something deliberately replaces it", and this is
+that replacement. Three things follow that are **design, not bugs**:
+
+- **A lost device is a lost account.** No recovery path exists, because every mechanism
+  worth having — a second signer, social recovery, an email fallback — is either out of
+  scope in SOW §4.1 or is the password this replaces.
+- **`localhost` and `musea-tips.vercel.app` hold separate accounts, permanently.** A
+  passkey is bound to its Relying Party ID. Development needs its own sign-up.
+- **Every pre-existing email account is unreachable.** Nothing migrates them; there is no
+  credential to migrate to.
 
 **Holding value and authorizing a tip** is a passkey smart account: an OpenZeppelin smart
-account contract on Soroban whose only signer is a secp256r1 key generated in the device's
-Secure Enclave. Musea never sees it. A total backend compromise cannot move a user's funds.
+account contract on Soroban whose only signer is that same secp256r1 key, generated in the
+device's Secure Enclave. Musea never sees it. A total backend compromise cannot move a
+user's funds — and now cannot impersonate them either, since there is no password hash to
+steal.
+
+> **The two credential records are deliberately separate rows.** `passkeyCredentials` is
+> the authenticator (written the instant an attestation verifies); `smartAccounts` is the
+> wallet (written once four network round trips have landed). Same physical passkey,
+> different lifecycles: if identity lived in `smartAccounts`, a user whose deployment
+> failed could not sign back in to retry it, and `forgetWallet` would delete their account.
+>
+> **Identity resolves through Better Auth's `account` table, through neither of them.**
+> That table is written only after a signature verifies; the other two hold key material
+> used to *check* a signature. Collapsing the authenticator and the identity store into one
+> row would make a single bad write both a forged key and a forged identity.
+
+> **Sign-up does not wait for the wallet.** The session is minted as soon as the attestation
+> verifies, and provisioning is scheduled (`passkeys.provisionWalletForSubject`). Holding
+> the response open for four network round trips would present a relayer hiccup as
+> "sign-up failed" for an account that was in fact created. The wallet card renders the
+> `pending` state and already knows how to resume.
 
 ### The constraint everything is shaped around
 

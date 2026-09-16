@@ -6,7 +6,14 @@ import { type TipErrorCode, userMessageFor } from "@musea/shared/errors";
 import { accountUrl, shorten } from "@musea/shared/stellar-links";
 import { useAction, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
-import { ExternalLink, Fingerprint, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
+import {
+  ExternalLink,
+  Fingerprint,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -185,6 +192,30 @@ export function WalletCard() {
     );
   }
 
+  /**
+   * Provisioning, from the passkey the account was created with.
+   *
+   * Every new user passes through this now: sign-up mints the session immediately and
+   * schedules the wallet, so there are a few seconds where the row exists as `pending`.
+   * Before passkey sign-in this branch was nearly unreachable and the card fell through to
+   * the deployed layout, which rendered a real-looking wallet with a "—" balance and an
+   * address link that goes nowhere. Say what is actually happening instead.
+   */
+  if (wallet?.status === "pending") {
+    return (
+      <div className="space-y-2 rounded-2xl border p-4">
+        <div className="flex items-center gap-2">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          <p className="text-sm font-medium">Setting up your wallet</p>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Deploying your smart account on Stellar testnet and adding some test XLM. This takes a few
+          seconds — you can keep browsing.
+        </p>
+      </div>
+    );
+  }
+
   if (needsWallet) {
     return (
       <div className="space-y-3 rounded-2xl border p-4">
@@ -193,8 +224,9 @@ export function WalletCard() {
           <p className="text-sm font-medium">Set up your wallet</p>
         </div>
         <p className="text-sm text-muted-foreground">
-          One tap creates a Stellar wallet held by this device. No seed phrase, no extension — your
-          key is generated in the Secure Enclave and never leaves it. Musea can&apos;t touch it.
+          Your wallet normally arrives with your account. If it didn&apos;t, one tap makes it now: a
+          Stellar wallet held by this device, no seed phrase and no extension — the key is generated
+          in the Secure Enclave and never leaves it. Musea can&apos;t touch it.
         </p>
         {wallet?.status === "failed" ? (
           <p className="text-sm text-destructive">

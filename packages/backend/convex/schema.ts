@@ -187,6 +187,60 @@ export default defineSchema({
     .index("by_artifact", ["artifactId"])
     .index("by_user", ["userId"]),
 
+  /**
+   * The passkey a user signs **in** with — the only way into the app.
+   *
+   * Everything here is public by construction: a credential id is a public handle and a
+   * public key is, definitionally, public. The private half was generated in the device's
+   * Secure Enclave and is not extractable, so this table cannot be turned into a login by
+   * anyone who steals it — an attacker with a full dump still cannot produce an assertion.
+   *
+   * **Why this is separate from `smartAccounts`, which stores the same credential.** It is
+   * the *same physical passkey* — one Face ID enrolment is both the login and the wallet's
+   * signer — but the two rows have different lifecycles and must not depend on each other:
+   *
+   *   - This row is written the instant a registration attestation verifies, before any
+   *     Stellar work happens. Wallet provisioning is four network round trips and can
+   *     fail; if identity lived in `smartAccounts`, a user whose deployment failed could
+   *     not sign back in to retry it.
+   *   - `smartAccounts` can be reset (`forgetWallet`) without costing the user their
+   *     account, which is the whole point of that escape hatch.
+   *
+   * **Identity is still resolved through Better Auth's `account` table, not from here.**
+   * That table is written only after a signature verifies; this one holds the material
+   * needed to *check* a signature. Keeping the two jobs apart is the same reasoning the
+   * deleted SEP-0010 sign-in used, and for the same reason: a table that maps credentials
+   * to users is only safe as an authenticator if nothing else can write to it.
+   */
+  passkeyCredentials: defineTable({
+    userId: v.id("users"),
+    /** base64url WebAuthn credential id. The handle the device offers at sign-in. */
+    credentialId: v.string(),
+    /** COSE public key, base64url, exactly as the authenticator published it. */
+    publicKey: v.string(),
+    /**
+     * The Relying Party ID this credential was created under.
+     *
+     * A passkey only resolves on the domain that created it, so a row written against
+     * `localhost` is unusable on the deployed site and vice versa. Stored so the app can
+     * say that plainly rather than surfacing an inscrutable WebAuthn failure.
+     */
+    rpId: v.string(),
+    /**
+     * The authenticator's signature counter, as of the last accepted assertion.
+     *
+     * A counter that goes backwards is the spec's cloned-authenticator signal. Apple's
+     * Secure Enclave reports 0 forever and never increments, so this cannot be enforced as
+     * a hard rule on the demo's target device — it is recorded so the check can be turned
+     * on if a device that does maintain one is ever supported.
+     */
+    counter: v.number(),
+    createdAt: v.number(),
+    lastUsedAt: v.optional(v.number()),
+  })
+    .index("by_credentialId", ["credentialId"])
+    .index("by_user", ["userId"]),
+
   // ----------------------------------------------------------------- Stellar
 
   /**

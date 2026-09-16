@@ -104,6 +104,35 @@ export async function signWithPasskey(args: {
 }
 
 /**
+ * Sign in. Call inside the tap handler with `challenge` already fetched.
+ *
+ * **No `allowCredentials`, and that is the point.** Sign-in is the one flow where the
+ * server does not yet know who is asking — publishing a credential list would require it
+ * to, and an endpoint that answered differently for known and unknown users would be an
+ * oracle for which accounts exist here. The credential is discoverable (it was created
+ * with `residentKey: "required"`), so the device finds the right passkey for this domain
+ * on its own and tells us which one it used.
+ *
+ * `rpId` is left to the browser to infer from the page's own origin rather than asserted.
+ * That is correct by construction on every environment, and it removes the one way this
+ * call can disagree with the domain the user is actually on.
+ */
+export async function signInWithPasskey(challenge: string): Promise<unknown> {
+  if (!passkeysSupported()) throw new PasskeyError("PASSKEY_UNSUPPORTED");
+  try {
+    return await startAuthentication({
+      optionsJSON: {
+        challenge,
+        userVerification: "required",
+        timeout: 60_000,
+      } as Parameters<typeof startAuthentication>[0]["optionsJSON"],
+    });
+  } catch (error) {
+    throw new PasskeyError(classify(error, "PASSKEY_NOT_REGISTERED"), error);
+  }
+}
+
+/**
  * Turn a DOMException into one of our codes.
  *
  * `NotAllowedError` is overwhelmingly the user dismissing the sheet — a decision, not a

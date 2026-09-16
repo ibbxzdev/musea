@@ -5,6 +5,7 @@ import { components, internal } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import authConfig from "./auth.config";
+import { passkeyAuth } from "./model/passkeyAuth";
 
 /**
  * Better Auth, wired through the @convex-dev/better-auth component.
@@ -56,7 +57,14 @@ export const authComponent = createClient<DataModel>(components.betterAuth, {
         await ctx.db.insert("users", {
           authSubject: authUser._id,
           name: displayName(authUser.name, authUser.email),
-          handle: await uniqueHandle(ctx, authUser.email ?? authUser.name ?? authUser._id),
+          // The name first, not the email. Every user's address is now a synthetic
+          // `…@passkey.invalid` derived from a credential id, so seeding the handle from
+          // it would give every curator a 20-character slice of base64url as their public
+          // @name. The chosen display name is the only human-meaningful thing we have.
+          handle: await uniqueHandle(
+            ctx,
+            authUser.name ?? realEmail(authUser.email) ?? authUser._id,
+          ),
           imageUrl: authUser.image ?? undefined,
           createdAt: Date.now(),
         });
@@ -87,10 +95,26 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
     baseURL: process.env.SITE_URL,
     database: authComponent.adapter(ctx),
 
-    emailAndPassword: {
-      enabled: true,
-      requireEmailVerification: false, // testnet demo; revisit before any real launch
-    },
+    /**
+     * **Email and password are gone. A passkey is the only way in.**
+     *
+     * Commit e32deb4 turned email sign-in back on because nothing else worked on a phone,
+     * and said it had to stay "until something deliberately replaces it". This is that
+     * replacement: `model/passkeyAuth.ts` is a real authentication method, distinct from
+     * the tip-signing the passkey also does.
+     *
+     * Two consequences that are not bugs and should not be "fixed" by re-enabling this:
+     *
+     *   - **A lost device is a lost account.** There is no recovery path, because every
+     *     recovery mechanism worth having — a second signer, social recovery, an email
+     *     fallback — is either explicitly out of scope in SOW §4.1 or is the password this
+     *     replaces. On testnet, holding nothing of value, that is an acceptable trade for
+     *     a demo whose entire claim is that nobody but the user can authorize anything.
+     *   - **`localhost` and the deployed domain hold separate accounts, permanently.** A
+     *     passkey is bound to its Relying Party ID. That is inherent to WebAuthn, and it
+     *     means development needs its own sign-up rather than a shared test login.
+     */
+    emailAndPassword: { enabled: false },
 
     /**
      * Required for `auth.api.deleteUser` in convex/users.ts to do anything. Without it
@@ -107,17 +131,28 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
      * silently does almost nothing. The Better Auth component ships a `rateLimit` table
      * for exactly this; using it is what makes Better Auth's own limits real.
      *
-     * There is no longer a custom rule here. One existed for `/stellar/*`, the SEP-0010
-     * wallet sign-in endpoints, which minted sessions without matching the `/sign-in`
-     * prefix Better Auth's strict 3-per-10s bucket keys on. Those endpoints are gone with
-     * the Freighter removal, so email sign-in and sign-up are once again the only
-     * session-minting paths and the built-in strict rule covers both.
+     * **The custom rules are back, and for the reason the SEP-0010 ones existed.** Better
+     * Auth's strict 3-per-10s bucket keys on the `/sign-in` prefix. `/passkey/*` mints
+     * sessions and does not match it, so without these the only session-minting paths in
+     * the app would be entirely unlimited — the exact hole the Freighter removal closed by
+     * accident and this reopens by design.
+     *
+     * The verify endpoints are the ones that matter: they are where an attacker would
+     * grind. The options endpoints are looser because a challenge is useless without an
+     * authenticator, and because a user who taps twice must not be locked out of their own
+     * sign-in.
      *
      * `enabled` is left at its default, which is production-only. Turning it on in
      * development would cap sign-in while iterating.
      */
     rateLimit: {
       storage: "database",
+      customRules: {
+        "/passkey/sign-in-verify": { window: 10, max: 5 },
+        "/passkey/sign-up-verify": { window: 60, max: 5 },
+        "/passkey/sign-in-options": { window: 10, max: 10 },
+        "/passkey/sign-up-options": { window: 10, max: 10 },
+      },
     },
 
     /**
@@ -132,7 +167,11 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
 
     // `authConfig` is required — it's how Convex learns to validate the JWTs this
     // issues, which is what makes ctx.auth.getUserIdentity() work.
-    plugins: [convex({ authConfig })],
+    //
+    // `passkeyAuth` is the only way a session is ever minted now. It takes `ctx` because
+    // its endpoints reach the WebAuthn cryptography by `runAction` into a "use node"
+    // module — this runtime cannot load it directly.
+    plugins: [convex({ authConfig }), passkeyAuth(ctx)],
   });
 
 function trustedOrigins(): string[] {
@@ -148,11 +187,24 @@ function trustedOrigins(): string[] {
   return [...origins];
 }
 
+/**
+ * An address a human actually chose, or null for the synthetic one a passkey user gets.
+ *
+ * `@passkey.invalid` addresses exist only because Better Auth requires a unique email per
+ * user; they are derived from a credential id and mean nothing to anyone. Anywhere an
+ * address would be *shown* or turned into a name, this is the filter.
+ */
+function realEmail(email: string | undefined | null): string | null {
+  const trimmed = email?.trim();
+  if (!trimmed || trimmed.endsWith("@passkey.invalid")) return null;
+  return trimmed;
+}
+
 /** A name to show. Falls back to the email local-part rather than rendering "undefined". */
 function displayName(name: string | undefined | null, email: string | undefined | null): string {
   const trimmed = name?.trim();
   if (trimmed) return trimmed;
-  const local = email?.split("@")[0]?.trim();
+  const local = realEmail(email)?.split("@")[0]?.trim();
   return local || "Curator";
 }
 

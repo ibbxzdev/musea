@@ -109,9 +109,10 @@ export const updateProfile = mutation({
  * the chain. The rows keep pointing at an id that no longer resolves, and the activity
  * view renders that as a departed curator.
  *
- * `stellarWallets` is out of scope here and owned by Story 2.x; wiring account deletion
- * into wallet teardown needs the sweep-or-abandon question answered first, and inventing
- * an answer in this file is how a testnet demo quietly becomes a custody policy.
+ * The passkey and smart-account rows go too — see the notes at each. Both delete only our
+ * *record*: the credential stays in the device keychain and the contract stays deployed
+ * on-chain, because neither is ours to destroy. That is the sweep-or-abandon question
+ * answered narrowly rather than turned into a custody policy in this file.
  */
 export const deleteAccount = mutation({
   args: {},
@@ -153,6 +154,36 @@ export const deleteAccount = mutation({
         await ctx.db.delete(file._id);
       }),
     );
+
+    /**
+     * The passkey credentials this account signs in with.
+     *
+     * These have to go, and for a sharper reason than tidiness: a credential id is
+     * write-once in `passkeys.recordCredential`, so a row left behind would permanently
+     * block that same device from ever registering again — the user would delete their
+     * account and then be unable to make a new one on the phone they are holding.
+     *
+     * Only our record is deleted. The passkey itself stays in the device's keychain and is
+     * not ours to remove; the user clears it in iOS Settings if they want to.
+     */
+    const credentials = await ctx.db
+      .query("passkeyCredentials")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+    await Promise.all(credentials.map((credential) => ctx.db.delete(credential._id)));
+
+    /**
+     * The smart account row, for the same reason and with the same limit: the contract
+     * stays deployed on-chain holding whatever balance it holds, because a testnet
+     * contract is not ours to destroy and the passkey that controls it still exists.
+     * Registering again on the same device derives the same address, so nothing is
+     * stranded — see `stellar/internal.ts:deleteSmartAccount`.
+     */
+    const wallet = await ctx.db
+      .query("smartAccounts")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .unique();
+    if (wallet) await ctx.db.delete(wallet._id);
 
     /**
      * The Better Auth user last. Its `onDelete` trigger (convex/auth.ts) deletes our

@@ -430,3 +430,109 @@ describe("double-submit guard", () => {
     ).resolves.toBeDefined();
   });
 });
+
+/**
+ * Passkey sign-in (`model/passkeyAuth.ts`, `passkeys.ts`).
+ *
+ * Email and password are gone, so a passkey credential is now the *only* thing standing
+ * between a stranger and someone's account — and between a stranger and their wallet,
+ * since the same credential authorizes tips. These are the negatives that matter.
+ */
+describe("passkey credentials are write-once and never reachable from a client", () => {
+  test("a credential that already has an owner cannot be re-pointed at another user", async () => {
+    const t = convexTest(schema, modules);
+    const { bob } = await seedTwoUsersAndATip(t);
+
+    const credential = {
+      credentialId: "cred-shared",
+      publicKey: "BASE64URL_PUBLIC_KEY",
+      rpId: "musea-tips.vercel.app",
+      counter: 0,
+    };
+
+    const first = await t.mutation(internal.passkeys.recordCredential, {
+      authSubject: ALICE,
+      ...credential,
+    });
+    expect(first.ok).toBe(true);
+
+    // A credential id is a public handle, not a secret. If registering an id that already
+    // exists re-pointed it at the caller, replaying someone else's public identifier would
+    // be a complete account takeover — of their profile *and* their smart account.
+    const second = await t.mutation(internal.passkeys.recordCredential, {
+      authSubject: BOB,
+      ...credential,
+    });
+    expect(second.ok).toBe(false);
+
+    const stored = await t.query(internal.passkeys.getCredential, {
+      credentialId: "cred-shared",
+    });
+    expect(stored?.userId).not.toBe(bob);
+  });
+
+  test("deleting an account frees its credential, so the same device can sign up again", async () => {
+    const t = convexTest(schema, modules);
+    await seedTwoUsersAndATip(t);
+
+    await t.mutation(internal.passkeys.recordCredential, {
+      authSubject: ALICE,
+      credentialId: "cred-reuse",
+      publicKey: "BASE64URL_PUBLIC_KEY",
+      rpId: "musea-tips.vercel.app",
+      counter: 0,
+    });
+
+    // Delete the rows the way deleteAccount does. Without this sweep the write-once rule
+    // above would permanently lock the user's own phone out of making a new account.
+    await t.run(async (ctx) => {
+      const row = await ctx.db
+        .query("passkeyCredentials")
+        .withIndex("by_credentialId", (q) => q.eq("credentialId", "cred-reuse"))
+        .unique();
+      if (row) await ctx.db.delete(row._id);
+    });
+
+    const again = await t.mutation(internal.passkeys.recordCredential, {
+      authSubject: BOB,
+      credentialId: "cred-reuse",
+      publicKey: "BASE64URL_PUBLIC_KEY",
+      rpId: "musea-tips.vercel.app",
+      counter: 0,
+    });
+    expect(again.ok).toBe(true);
+  });
+
+  test("a credential for an unknown subject is refused rather than orphaned", async () => {
+    const t = convexTest(schema, modules);
+    await seedTwoUsersAndATip(t);
+
+    const result = await t.mutation(internal.passkeys.recordCredential, {
+      authSubject: "auth|nobody",
+      credentialId: "cred-orphan",
+      publicKey: "BASE64URL_PUBLIC_KEY",
+      rpId: "musea-tips.vercel.app",
+      counter: 0,
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  test("none of the passkey surface is publicly callable", () => {
+    /**
+     * Enforced by the typechecker rather than at runtime, because that is where Convex
+     * actually enforces it: `api` is a lazy Proxy that answers to any property name, so
+     * `expect(api.passkeys).toBeUndefined()` can never fail. The real boundary is the type
+     * — `api` is `FilterApi<…, "public">`, so an `internalMutation` has no callable member
+     * there at all.
+     *
+     * If anyone promotes `recordCredential` to a public `mutation`, this line stops being
+     * an error, `@ts-expect-error` becomes unused, and `tsc --noEmit` fails the build. That
+     * matters: a public mutation able to write `passkeyCredentials` would let anyone
+     * register their own device against someone else's account and sign in as them — with
+     * email gone, it is the whole authentication system.
+     */
+    // @ts-expect-error - recordCredential is internal and must never appear on `api`.
+    void api.passkeys.recordCredential;
+    expect(true).toBe(true);
+  });
+});

@@ -1,7 +1,9 @@
 "use client";
 
-import { createAuthClient } from "better-auth/react";
+import type { passkeyAuth } from "@musea/backend/convex/model/passkeyAuth";
 import { convexClient } from "@convex-dev/better-auth/client/plugins";
+import type { BetterAuthClientPlugin } from "better-auth/client";
+import { createAuthClient } from "better-auth/react";
 
 /**
  * Where the browser sends `/api/auth/*` requests.
@@ -40,6 +42,57 @@ function resolveBaseURL(): string | undefined {
 }
 
 /**
+ * Client half of the passkey sign-in plugin.
+ *
+ * Purely a type carrier and a route table — there is no logic here, deliberately.
+ * `$InferServerPlugin` imports the *type* of the server plugin, which is what gives
+ * `authClient.passkey.signInOptions()` and friends their argument and return types;
+ * `import type` means nothing from the backend reaches the bundle at runtime.
+ *
+ * The paths mirror the endpoints in `packages/backend/convex/model/passkeyAuth.ts`. Better
+ * Auth turns each path segment into a nested camelCase property, so
+ * `/passkey/sign-in-options` is reached as `authClient.passkey.signInOptions`.
+ */
+const passkeyAuthClient = () =>
+  ({
+    id: "passkey-auth",
+    $InferServerPlugin: {} as ReturnType<typeof passkeyAuth>,
+    pathMethods: {
+      "/passkey/sign-up-options": "POST",
+      "/passkey/sign-up-verify": "POST",
+      "/passkey/sign-in-options": "POST",
+      "/passkey/sign-in-verify": "POST",
+    },
+
+    /**
+     * Tell the client which of these start a session.
+     *
+     * Without this, passkey sign-in sets the cookie and then appears to do nothing: the
+     * server is satisfied, but `useSession()` goes on returning null until something
+     * reloads the page. Anything gated on the session — the redirect on the sign-in page,
+     * and the Convex token `convexClient()` mints from it — waits forever.
+     *
+     * The reason is that Better Auth decides when to refetch the session from a fixed list
+     * of *exact* paths (`/sign-in/email`, `/sign-up/email`, `/sign-out`, …) in
+     * `client/config.mjs`. It is equality, not a prefix match, and there is no hook for
+     * "this endpoint authenticated someone" — so every plugin that mints a session has to
+     * say so here. better-auth's own admin plugin does exactly this for
+     * `/admin/impersonate-user`, which changes the session without being a sign-in path.
+     *
+     * This cost the SEP-0010 sign-in a debugging session before it was found. The two
+     * `-options` paths are deliberately absent: they issue a challenge and change nothing
+     * about who the caller is.
+     */
+    atomListeners: [
+      {
+        matcher: (path: string) =>
+          path === "/passkey/sign-in-verify" || path === "/passkey/sign-up-verify",
+        signal: "$sessionSignal",
+      },
+    ],
+  }) satisfies BetterAuthClientPlugin;
+
+/**
  * Better Auth browser client.
  *
  * The `convexClient()` plugin is what lets ConvexBetterAuthProvider mint Convex tokens
@@ -52,7 +105,7 @@ function resolveBaseURL(): string | undefined {
  */
 export const authClient = createAuthClient({
   baseURL: resolveBaseURL(),
-  plugins: [convexClient()],
+  plugins: [convexClient(), passkeyAuthClient()],
 });
 
 /**
