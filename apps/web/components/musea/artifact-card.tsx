@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, MoreHorizontal, Play, TriangleAlert } from "lucide-react";
+import * as React from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -96,20 +97,48 @@ function NoteTile({ artifact }: { artifact: Artifact }) {
   );
 }
 
+/**
+ * What an unmeasured tile reserves until its picture arrives.
+ *
+ * Slightly taller than wide, which is the commonest shape for a scraped `og:image` and
+ * reads as a card rather than a banner. The exact number matters far less than *having*
+ * one — see below.
+ */
+const UNMEASURED_TILE_RATIO = 4 / 5;
+
 function MediaTile({ artifact }: { artifact: Artifact }) {
   // A link or a video is not self-describing — a photograph is. Caption only the first two.
   const showCaption = artifact.kind === "link" || artifact.kind === "video";
+
+  /**
+   * The picture's real shape, learned from the image itself.
+   *
+   * Only ever used for artifacts that arrived without a declared `aspectRatio` — a scraped
+   * `og:image` has no size in the markup, so this is the only way to know it.
+   */
+  const [measured, setMeasured] = React.useState<number | null>(null);
+  const ratio = artifact.aspectRatio ?? measured ?? UNMEASURED_TILE_RATIO;
 
   return (
     <span
       className="relative block w-full"
       /**
-       * Set from the artifact when we know it — an upload is measured in the browser at
-       * pick time — so the column reserves the right height before the picture arrives
-       * and the grid never jumps. A scraped `og:image` has no declared size, so those
-       * tiles take their height from the image itself once it loads.
+       * **Always set, never undefined.** An upload carries its ratio because the browser
+       * measured it at pick time; a scraped `og:image` does not, and those tiles used to
+       * render with no reserved height at all — `h-auto` on an image that has not loaded
+       * is a box 0px tall.
+       *
+       * That is what made the grid move things around. This is a CSS multi-column
+       * container, and the browser *balances* it: it re-runs the distribution whenever the
+       * content's measurements change, and is free to move an item into a different column
+       * when it does. With zero-height tiles at first paint, every image that finished
+       * loading was another re-balance — so a tile you were about to click could be
+       * somewhere else by the time you clicked it.
+       *
+       * Reserving a box up front means the heights the balancer sees at first paint are
+       * the heights it keeps.
        */
-      style={artifact.aspectRatio ? { aspectRatio: artifact.aspectRatio } : undefined}
+      style={{ aspectRatio: ratio }}
     >
       {/*
         A plain <img>, not next/image. These are third-party thumbnails from whatever host
@@ -123,10 +152,18 @@ function MediaTile({ artifact }: { artifact: Artifact }) {
         alt={artifact.title}
         loading="lazy"
         decoding="async"
-        className={cn(
-          "w-full object-cover",
-          artifact.aspectRatio ? "absolute inset-0 h-full" : "h-auto",
-        )}
+        onLoad={
+          artifact.aspectRatio
+            ? undefined
+            : (event) => {
+                // Adopt the picture's true shape once, so an unmeasured tile is not stuck
+                // at the placeholder ratio forever. Guarded on `naturalHeight` because a
+                // broken image reports 0 and would set an infinite ratio.
+                const { naturalWidth, naturalHeight } = event.currentTarget;
+                if (naturalHeight > 0) setMeasured(naturalWidth / naturalHeight);
+              }
+        }
+        className="absolute inset-0 h-full w-full object-cover"
       />
 
       {artifact.kind === "video" && (
@@ -207,7 +244,19 @@ function ArtifactMenu({ artifact, actions }: { artifact: Artifact; actions: Arti
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="absolute top-1 right-1 flex size-11 items-center justify-center rounded-full text-white opacity-100 transition-opacity focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+          /**
+           * `pointer-events` tracks the opacity, and that pairing is the whole point.
+           *
+           * An `opacity: 0` element is invisible but still takes clicks. This button is
+           * 44×44 and sits in the top-right corner of every tile, so on a pointer device
+           * each card had an invisible dead zone that swallowed the click meant to open
+           * the artifact — you click the picture, nothing opens, and there is nothing on
+           * screen to explain why. Hiding it has to mean hiding it from the pointer too.
+           *
+           * The touch case is unaffected: there is no hover, so it stays at `opacity-100`
+           * and `pointer-events-auto` below `sm`.
+           */
+          className="absolute top-1 right-1 flex size-11 items-center justify-center rounded-full text-white opacity-100 transition-opacity focus-visible:opacity-100 sm:pointer-events-none sm:opacity-0 sm:group-focus-within:pointer-events-auto sm:group-focus-within:opacity-100 sm:group-hover:pointer-events-auto sm:group-hover:opacity-100"
         >
           <span className="flex size-7 items-center justify-center rounded-full bg-black/40 backdrop-blur-sm">
             <MoreHorizontal className="size-4" />
