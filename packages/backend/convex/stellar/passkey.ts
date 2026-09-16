@@ -171,6 +171,21 @@ export const getMyBalance = action({
 });
 
 /**
+ * Fill the signed-in user's wallet if it is empty, and return the resulting balance.
+ *
+ * Needed because deploying an account and funding it are separate steps that fail
+ * separately — a wallet can exist, correctly, and still hold nothing. No passkey prompt:
+ * funding credits the account, and crediting an account needs no authorization from it.
+ */
+export const fundMyWallet = action({
+  args: {},
+  handler: async (ctx): Promise<string> => {
+    const userId = await requireCurrentUserIdFromAction(ctx);
+    return await ctx.runAction(internal.stellar.passkeyNode.topUpSmartAccount, { userId });
+  },
+});
+
+/**
  * Forget the signed-in user's smart account.
  *
  * Deliberately does **not** touch anything on-chain: the account stays deployed and keeps

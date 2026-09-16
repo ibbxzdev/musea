@@ -32,6 +32,7 @@ export function WalletCard() {
   const startRegistration = useAction(api.stellar.passkey.startRegistration);
   const finishRegistration = useAction(api.stellar.passkey.finishRegistration);
   const getBalance = useAction(api.stellar.passkey.getMyBalance);
+  const fundWallet = useAction(api.stellar.passkey.fundMyWallet);
 
   const [options, setOptions] = React.useState<unknown>(null);
   const [creating, setCreating] = React.useState(false);
@@ -39,6 +40,7 @@ export function WalletCard() {
   const [refreshing, setRefreshing] = React.useState(false);
   /** Temporary: the raw last failure, rendered on the card for the device pass. */
   const [detail, setDetail] = React.useState<string | null>(null);
+  const [funding, setFunding] = React.useState(false);
 
   const supported = React.useMemo(() => passkeysSupported(), []);
   const needsWallet = wallet === null || wallet?.status === "failed";
@@ -78,6 +80,30 @@ export function WalletCard() {
   React.useEffect(() => {
     if (wallet?.status === "deployed") void refreshBalance();
   }, [wallet?.status, refreshBalance]);
+
+  /**
+   * Fill a wallet that deployed but never funded.
+   *
+   * Its own control rather than something the balance refresh does silently: funding is a
+   * network transaction, and a button that quietly moves money when you meant to reload a
+   * number is the wrong shape even when the money is testnet XLM.
+   */
+  const handleFund = async () => {
+    if (funding) return;
+    setFunding(true);
+    setDetail(null);
+    const toastId = toast.loading("Adding testnet XLM…");
+    try {
+      const next = await fundWallet({});
+      setBalance(next);
+      toast.success("Wallet funded", { id: toastId });
+    } catch (error) {
+      setDetail(logError("fundMyWallet", error));
+      toast.error(walletErrorMessage(error), { id: toastId });
+    } finally {
+      setFunding(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (creating) return;
@@ -182,6 +208,17 @@ export function WalletCard() {
       <p className="text-2xl font-semibold tabular-nums">
         {balance === null ? "—" : `${formatXlm(BigInt(balance))} XLM`}
       </p>
+
+      {balance === "0" ? (
+        <Button
+          onClick={() => void handleFund()}
+          disabled={funding}
+          variant="secondary"
+          className="tap-target w-full"
+        >
+          {funding ? "Adding…" : "Add testnet XLM"}
+        </Button>
+      ) : null}
 
       <a
         href={accountUrl(wallet.contractAddress, STELLAR_NETWORK)}

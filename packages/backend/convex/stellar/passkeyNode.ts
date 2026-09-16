@@ -139,7 +139,19 @@ export const provisionSmartAccount = internalAction({
     const existing = await ctx.runQuery(internal.stellar.internal.getSmartAccountByUser, {
       userId,
     });
-    if (existing?.status === "deployed") return existing.contractAddress;
+    if (existing?.status === "deployed") {
+      // Deployed, but not necessarily funded — deployment and funding are separate steps
+      // and the second one can fail on its own. Returning here without retrying would
+      // leave an empty wallet with no way to fill it: the profile card hides the create
+      // button once an account exists, so this early return was the only route back in.
+      // Idempotent, so an account that already holds a balance costs one read.
+      try {
+        await fundIfEmpty(ctx, { accountId: existing._id, ...existing });
+      } catch (error) {
+        console.error(`[musea] top-up for ${existing.contractAddress} failed: ${detail(error)}`);
+      }
+      return existing.contractAddress;
+    }
 
     const response = registrationResponse as RegistrationResponseJSON;
 
@@ -238,7 +250,23 @@ export const provisionSmartAccount = internalAction({
       // recoverable on the next attempt, whereas coupling the two would make a funding
       // hiccup look like a failed account and tempt a second deployment.
       step = "fund";
-      await fundIfEmpty(ctx, accountId, created.contractId, created.credentialId, publicKeyHex);
+      try {
+        await fundIfEmpty(ctx, {
+          accountId,
+          contractAddress: created.contractId,
+          credentialId: created.credentialId,
+          publicKeyHex,
+          birthWasmHash: cfg.accountWasmHash,
+          creationTransactionHash: deployHash,
+          creationLedger: creationTx.ledger,
+        });
+      } catch (error) {
+        // Swallowed on purpose, and only here. The account is deployed and on-chain by
+        // this point; reporting "wallet creation failed" for a wallet that exists sends
+        // the user to create a second one, which would strand the first. An empty wallet
+        // is visible on the profile and recoverable with a tap — a lost one is not.
+        console.error(`[musea] funding ${created.contractId} failed: ${detail(error)}`);
+      }
 
       console.warn(`[musea] provisioned ${created.contractId} for ${userId} (tx ${deployHash})`);
       return created.contractId;
@@ -260,15 +288,32 @@ export const provisionSmartAccount = internalAction({
   },
 });
 
-/** Top up an account holding nothing. Safe to call repeatedly; a funded account is left alone. */
+/**
+ * Top up an account holding nothing. Safe to call repeatedly; a funded account is left alone.
+ *
+ * **Takes the account's real birth metadata, and that is the whole point.** Funding has to
+ * connect the kit, and `connectWallet` verifies the account's immutable birth from the
+ * stored credential only when all three fields are present — otherwise it asks the public
+ * indexer, which lags the network by a few ledgers and does not serve the claim it wants
+ * anyway (Story 2B.0, finding 3). This used to pass `undefined` for the transaction hash
+ * and ledger, so every newly deployed account fell to the indexer and failed provisioning
+ * with `WalletProvenanceError` 2005 — seconds after the very transaction that would have
+ * satisfied it.
+ */
 async function fundIfEmpty(
   ctx: ActionCtx,
-  accountId: Id<"smartAccounts">,
-  contractAddress: string,
-  credentialId: string,
-  publicKeyHex: string,
+  account: {
+    accountId: Id<"smartAccounts">;
+    contractAddress: string;
+    credentialId: string;
+    publicKeyHex: string;
+    birthWasmHash?: string;
+    creationTransactionHash?: string;
+    creationLedger?: number;
+  },
 ): Promise<void> {
   const cfg = stellarConfig();
+  const { accountId, contractAddress } = account;
 
   const balance = await readSacBalance(contractAddress);
   if (balance > 0n) {
@@ -278,24 +323,56 @@ async function fundIfEmpty(
 
   const storage = new MemoryStorage();
   const kit = buildKit({ storage });
-  await connectStoredWallet(kit, storage, {
-    contractAddress,
-    credentialId,
-    publicKeyHex,
-    birthWasmHash: cfg.accountWasmHash,
-    creationTransactionHash: undefined,
-    creationLedger: undefined,
-  });
+  await connectStoredWallet(kit, storage, account);
 
   const funded = await kit.fundWallet(cfg.xlmSacId);
   if (funded.success) {
     await ctx.runMutation(internal.stellar.internal.markSmartAccountFunded, { accountId });
+    console.warn(`[musea] funded ${contractAddress}`);
   } else {
     // Not fatal. The account exists and can be funded on the next attempt or by the
     // treasury; refusing to hand it back would strand a perfectly good account.
-    console.error(`funding ${contractAddress} failed: ${funded.error?.message ?? "unknown"}`);
+    console.error(
+      `[musea] funding ${contractAddress} failed: ${funded.error?.message ?? "unknown"}`,
+    );
   }
 }
+
+/**
+ * Fill an account that holds nothing.
+ *
+ * Deployment and funding fail independently, so "you have a wallet" and "you can spend
+ * from it" are genuinely different states, and the second one needs a way back. Without
+ * this an account that deployed but never funded is a dead end: the profile hides the
+ * create button once a wallet exists, and tipping from it fails the balance pre-check.
+ *
+ * Also the recovery path for the ordinary case of running the testnet balance down mid-demo.
+ */
+export const topUpSmartAccount = internalAction({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }): Promise<string> => {
+    const account = await ctx.runQuery(internal.stellar.internal.getSmartAccountByUser, {
+      userId,
+    });
+    if (!account || account.status !== "deployed") {
+      const code = "PASSKEY_NOT_REGISTERED" as const;
+      throw new ConvexError({ code, message: userMessageFor(code) });
+    }
+
+    try {
+      await fundIfEmpty(ctx, { accountId: account._id, ...account });
+    } catch (error) {
+      const code = error instanceof TipError ? error.code : classifyStellarError(error);
+      throw new ConvexError(
+        reportFailure(`topUpSmartAccount(${userId})`, code, userMessageFor(code), error),
+      );
+    }
+
+    // Read back rather than trusting the funding call, so the number the profile shows is
+    // one the network agreed to.
+    return (await readSacBalance(account.contractAddress)).toString();
+  },
+});
 
 // ──────────────────────────────────────────────────────────────────────────── balance
 
@@ -451,6 +528,38 @@ export async function connectStoredWallet(
     creationLedger?: number;
   },
 ): Promise<void> {
+  /**
+   * All three birth fields, or none of this works.
+   *
+   * `connectWallet` verifies an account's immutable birth from the stored credential only
+   * when the wasm hash, creation transaction and creation ledger are *all* present. Miss
+   * one and it silently asks the public indexer instead — which lags the network by a few
+   * ledgers and does not serve the claim it needs anyway. The failure then surfaces as
+   * `WalletProvenanceError` 2005 blaming indexer staleness, which is true and completely
+   * misleading: the data was in our own row the whole time.
+   *
+   * Refusing here costs nothing, because the indexer path has never once succeeded in this
+   * project. It turns a confusing error about someone else's infrastructure into a
+   * sentence naming the field we failed to pass.
+   */
+  const missing = (
+    [
+      ["birthWasmHash", account.birthWasmHash],
+      ["creationTransactionHash", account.creationTransactionHash],
+      ["creationLedger", account.creationLedger],
+    ] as const
+  )
+    .filter(([, value]) => value === undefined || value === null)
+    .map(([name]) => name);
+
+  if (missing.length > 0) {
+    throw new TipError(
+      "PASSKEY_PROVISIONING_FAILED",
+      `Cannot connect ${account.contractAddress}: birth metadata is incomplete (missing ` +
+        `${missing.join(", ")}), so the kit would fall back to the stale public indexer.`,
+    );
+  }
+
   const credential: StoredCredential = {
     credentialId: account.credentialId,
     publicKey: new Uint8Array(Buffer.from(account.publicKeyHex, "hex")),
