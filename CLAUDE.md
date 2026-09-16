@@ -14,21 +14,23 @@ per-gallery tip totals on-chain. 30-day Instaward scope.
 | `docs/archive/` | Superseded SOW drafts, kept verbatim. Historical only — never build from these |
 
 The SOW is a commitment to a funder. **Do not expand scope.** Mainnet, fiat, native apps,
-wallet adapters beyond Freighter (LOBSTR, Stellar Wallets Kit, WalletConnect), and signer
+wallet adapters (Freighter, LOBSTR, Stellar Wallets Kit, WalletConnect), and signer
 features beyond one device passkey (multisig, social recovery, spending policies) are all
 explicitly out of scope — if one seems necessary, say so and stop rather than building it.
 
-> **Freighter is in scope, as an optional signer** (SOW §4.2a) — added at the project
-> owner's direction, reversing v1/v2. It is additive: the built-in wallet is still
-> provisioned for everyone and is still what gets demonstrated on iPhone Safari, because
-> Freighter is a desktop extension with no iOS build. Do not let it become the primary
-> path, and do not add a second adapter alongside it.
+> **Freighter is gone.** It was briefly in scope as an optional signer (SOW §4.2a); the
+> project owner then removed it. A desktop extension with no iOS build could never be the
+> thing demonstrated on an iPhone, and keeping a second signer alive doubled every code
+> path for a user nobody would film. There is now exactly one way to hold value and one
+> way to authorize a tip. If a second signer is ever wanted again, the seams are
+> `resolveCuratorAddress` in `stellar/tipsNode.ts` and the `smartAccounts` table — but
+> that is a decision to take deliberately, not a refactor to slip in.
 
-> **The custody model changed in SOW v3.** Wallets are **non-custodial passkey smart
-> accounts** (WebAuthn / Face ID, secp256r1), not app-managed encrypted keys. Anything in
-> this repo that generates a keypair, encrypts a secret, or signs server-side is **v1
-> code awaiting removal** — do not extend it, and do not copy its shape into new work.
-> See §4.2 of the SOW.
+> **Wallets are non-custodial passkey smart accounts** (WebAuthn / Face ID, secp256r1),
+> not app-managed encrypted keys — SOW v3 §4.2. The v1 custodial code is **deleted**:
+> `stellar/crypto.ts`, `walletsNode.ts`, `stellarWallets.encryptedSecret` and the rows
+> that held it are all gone. If you find yourself writing envelope encryption, key
+> rotation, or a `decrypt()` call, stop — that was v1 and it is not coming back.
 
 ---
 
@@ -75,9 +77,10 @@ account's contract address and the passkey credential id, both public by constru
 | Bottom sheet / toasts | Vaul / Sonner | 1.1.x / 2.0.x |
 | Backend | Convex | 1.45.x |
 | Auth | Better Auth + `@convex-dev/better-auth` | **1.6.31** / 0.12.5 |
-| Stellar SDK | `@stellar/stellar-sdk` (backend only) | 17.x |
-| Smart wallet | `smart-account-kit` (WebAuthn half in the browser; rest server-side) | TBD — Story 2.1 |
-| Gasless submission | OpenZeppelin Relayer / Stellar Channels — `https://channels.openzeppelin.com/testnet` (keys at `/gen`) | TBD — Story 2.2 |
+| Stellar SDK | `@stellar/stellar-sdk` (backend only) | **16.3.0 — pinned, see below** |
+| Smart wallet | `smart-account-kit` (WebAuthn half in the browser; rest server-side) | 0.8.0 |
+| WebAuthn (browser) | `@simplewebauthn/browser` | 13.x |
+| Gasless submission | OpenZeppelin Relayer / Stellar Channels — `https://channels.openzeppelin.com/testnet` (keys at `/gen`) | live |
 | Contract | Rust + `soroban-sdk` | 27.0.6 |
 | Runtime | Node | 22+ (built on 24) |
 
@@ -88,6 +91,12 @@ account's contract address and the passkey credential id, both public by constru
 
 > **The OpenZeppelin Relayer replaced Launchtube.** Any tutorial that reaches for
 > Launchtube is out of date.
+
+> **Do not upgrade `@stellar/stellar-sdk` to 17.x.** `smart-account-kit@0.8.0` reads
+> `simulationData.result.auth` expecting decoded XDR objects; SDK 17 returns base64
+> strings, and the kit fails with `discoveredAuth[0].rootInvocation is not a function`.
+> A pnpm `overrides` entry does **not** fix this — the SDK is a *peer* dependency of the
+> kit, so it resolves from the importer, which is why the backend itself is pinned.
 
 > **Do not upgrade `better-auth` past 1.6.x.** `@convex-dev/better-auth@0.12.5` declares
 > `better-auth >=1.6.11 <1.7.0`. 1.7.x is published and will install cleanly with
@@ -113,9 +122,15 @@ packages/backend/         Convex deployment
   convex/galleryArtifacts.ts  the artifact <-> gallery join
   convex/linkPreview.ts     "use node": oEmbed + Open Graph enrichment. No AI.
   convex/files.ts           uploads, and the record of who uploaded what
-  convex/stellar/           "use node" actions: config, wallets, tips
-  convex/stellar/crypto.ts  v1 envelope encryption — DELETE with Story 2.1, do not extend
-  convex/stellar/internal.* default-runtime DB helpers (actions cannot write)
+  convex/stellar/passkey.ts     auth-guarded surface: getMyWallet, start/finishRegistration
+  convex/stellar/passkeyNode.ts "use node": Smart Account Kit, provisioning, funding, balance
+  convex/stellar/tips.ts        auth-guarded surface: prepareTip, submitTip, totals
+  convex/stellar/tipsNode.ts    "use node": build/simulate/assemble, auth digest, submit
+  convex/stellar/relayer.ts     OpenZeppelin Channels client (holds the API key)
+  convex/stellar/diagnostics.ts error unwrapping + the DEBUG_ERRORS switch
+  convex/stellar/config.ts      env validation — every Stellar env var is read here
+  convex/stellar/internal.ts    default-runtime DB helpers (actions cannot write)
+apps/web/lib/musea/passkey.ts   the browser's entire crypto role. No Stellar imports.
 packages/shared/          Pure TS used by both sides: stroop math, error map, links
 packages/typescript-config/, packages/eslint-config/
 contracts/tipjar/         Rust Soroban contract + tests
@@ -152,31 +167,29 @@ broken scaffold.
 
 ## State of the repo
 
-The repo is mid-migration from SOW v1 (custodial) to v3 (passkey). Read this column
-carefully — "Done" and "Done, v1 custody" mean very different things.
+The v1 → v3 migration is **complete**. There is no custodial code left anywhere, and no
+second signer.
 
 | Area | State |
 |---|---|
 | Monorepo, configs, lint rules, CI-able task graph | Done |
-| `packages/shared` stroop math + error map | Done, tested. Error map needs passkey/relayer codes |
+| `packages/shared` stroop math + error map | Done, tested. Carries the passkey and relayer codes |
 | Convex schema, auth guards, DB helpers, config validation | Done; codegen run, typechecks against a live dev deployment |
 | `contracts/tipjar/` | **Done. Redeployed for the XLM cutover** — the token is a constructor arg, so only the binding changed. 10/10 tests, clippy clean, deployed `CCZPKSRP…` bound to the native SAC `CDLZFC3S…`, sample tip `762d5d84…`, and a zero-trustline recipient proved at `d0eb9b53…`. The old USDC deployment `CAIH6NCC…` is retired |
-| `convex/auth.ts` + `auth.config.ts` Better Auth wiring | Done. Safari device pass outstanding |
-| Wallet sign-in (SEP-0010, `convex/model/walletAuth.ts`) | **Done on testnet.** Email/password is still the default and the only path on a phone; "Continue with Freighter" is additive and hides itself when there is no extension. Verified end to end against `zealous-stork-862`: session issued, replay and wrong-signer both 401, repeat sign-in resolves to the same user |
-| Musea app (artifacts, galleries, filing, profile) | Done and on a live dev deployment. Ported from the iOS repo; 34 backend tests, `convex-authz` clean |
-| `convex/stellar/crypto.ts`, `walletsNode.ts` provisioning | **Done, v1 custody — to be removed.** Keypair + Friendbot + encrypted secret. Superseded by Story 2.1 |
-| `convex/stellar/tipsNode.ts` | **Done, v1 custody — signing half to be replaced.** Build/simulate/assemble/submit survives; server-side signing does not |
-| Passkey smart account, WebAuthn, relayer | **Not started.** Story 2.x |
-| Tipping UI — tip sheet, balance chip, gallery total | **Done and working** (Stories 3.2/3.3/3.5), on the v1 custodial actions. `sendTip` returns a real tx hash and the badge reads contract state. Rewire for passkey, don't rebuild |
-| Activity page, iPhone device pass, **deploy** | **Not started.** Stories 3.4 / 3.6 / 3.7. The deploy is what stands between this and a demo anyone else can open |
+| `convex/auth.ts` + `auth.config.ts` Better Auth wiring | Done. Email and password, the only way in. The SEP-0010 wallet sign-in plugin and its `/stellar/*` rate-limit rule are deleted with Freighter |
+| Musea app (artifacts, galleries, filing, profile) | Done and on a live dev deployment. Ported from the iOS repo; 41 backend tests, `convex-authz` clean |
+| Passkey smart account, WebAuthn, relayer | **Done and proven on a real iPhone.** Deployed gaslessly through OpenZeppelin Channels, funded through the native SAC. See Epic 2B below |
+| `convex/stellar/tipsNode.ts` | **Done.** prepare → device signs → submit, all gasless. The transaction never leaves the server; only a 32-byte challenge does |
+| Tipping UI — tip sheet, balance chip, gallery total | **Done and working** (Stories 3.2/3.3/3.5), rewired onto the passkey actions. The badge reads contract state |
+| Activity page, iPhone device pass, **deploy** | Device pass **done** (Story 3.6). Activity page (3.4) not started. Deployed on Vercel at `musea-tips.vercel.app` |
 
-The contract has run against Stellar testnet and the v1 custodial actions have too — three
-real tips. What has *not* run is anything passkey-shaped. Treat every "not started" above
-as genuinely unproven.
+**Deliverable 2 is proven end to end on hardware.** A passkey-signed tip of 5 XLM landed
+at `182571fe…baab6ab`, from smart account `CATDEQEY…` to `CAR7AU4R…`, authorized by Face
+ID on an iPhone in Safari and submitted gaslessly — the user paid no fee and holds no
+classic account. Both ends are `C…` contracts.
 
-**The v1 custodial path still works, and that is useful.** It is the fastest way to
-exercise the contract end-to-end on any device while the passkey path is built. Keep it
-runnable until Story 2.3 lands; see SOW §4.4 and Epic 5.
+What is *not* proven: the Activity page (not built), and anything on mainnet (out of
+scope, permanently).
 
 **The Musea app is a port, not a rewrite.** `github.com/ibo-najjar/Musea` is the iOS
 original and is the reference for behaviour. What was deliberately left out, and must stay
@@ -203,52 +216,85 @@ the only remaining precondition on either side is that the account exists on the
 
 ---
 
-## Signing in with a wallet
+## The passkey wallet
 
-There are two ways into the app. Email and password is the default and works everywhere.
-"Continue with Freighter" proves you hold a Stellar key, using **SEP-0010** — the standard
-Stellar web-auth ceremony — and is wired in as a Better Auth plugin
-(`convex/model/walletAuth.ts`), with the cryptography in `convex/stellar/webAuthNode.ts`.
+One way in, one way to sign, and they are different things.
 
-**The challenge transaction has sequence number 0, and that is the security property.**
-Sequence 0 is never valid on the network, so what the user signs can never be submitted, by
-us or by anyone who intercepts it. Freighter still shows a transaction-approval popup —
-that is the only UI it has — so the copy around the button has to say that nothing moves.
-Never "fix" the sequence number.
+**Signing in** is email and password, via Better Auth. It works on every device, which is
+why it is the only option — the SEP-0010 wallet sign-in is deleted along with Freighter.
 
-Four things about this are load-bearing:
+**Holding value and authorizing a tip** is a passkey smart account: an OpenZeppelin smart
+account contract on Soroban whose only signer is a secp256r1 key generated in the device's
+Secure Enclave. Musea never sees it. A total backend compromise cannot move a user's funds.
 
-- **Identity comes from the `account` table, never from `externalWallets`.** A row in
-  `externalWallets` is written by `external.ts:linkWallet`, which takes an address from the
-  client and proves nothing about who holds its key. Adopting a user from that table would
-  let anyone claim a stranger's address and then collect their sign-ins. An `account` row
-  with `providerId: "stellar"` is only ever written after a signature has verified.
-- **The Convex Better Auth component's schema is fixed** — user, account, session,
-  verification, and some OAuth tables — and an app cannot add to it. This is why
-  better-auth's own `siwe` plugin cannot be used even as a base: it persists to a
-  `walletAddress` table that does not exist here, and separately rejects a 56-character
-  `G...` key against its 42-character `0x` pattern before its `verifyMessage` hook runs.
-- **Signing in links the wallet.** The proof is strictly stronger than what the
-  connect-wallet button asks for, so a curator who arrives this way is immediately
-  tippable. Connect-wallet remains the recovery path if the link fails.
-- **Rate limits are set explicitly in `auth.ts`.** Better Auth's strict 3-per-10s bucket is
-  matched by path prefix against `/sign-in` and `/sign-up`, which `/stellar/*` does not
-  match — so without the custom rule these session-minting endpoints would inherit the
-  loose 100-per-10s default. Storage is `"database"` because the default `"memory"` is a
-  per-isolate counter, which on Convex means almost no limit at all. Note that Better Auth
-  enables rate limiting **in production only**.
+### The constraint everything is shaped around
 
-A wallet-only user has no email, so one is synthesised as `<address>@wallet.invalid` —
-`.invalid` is reserved by RFC 2606 and can never resolve, so nothing can later try to
-deliver to it.
+**A Convex action cannot call the browser.** WebAuthn lives on the device, so every passkey
+operation is two actions with the browser in the middle:
 
-> **Freighter is desktop-only, so this is not the iPhone path.** The button is hidden
-> entirely when no extension is present rather than rendered disabled. Email remains what
-> gets demonstrated on iPhone Safari until the passkey work in Story 2.1 lands — and a
-> passkey smart account is the version of "sign in with your wallet" the SOW actually
-> commits to.
+```
+Convex action   build → simulate → assemble → derive the auth digest   ─┐
+                                                                        ▼
+browser                        navigator.credentials.get({ challenge })  → Face ID
+                                                                        │
+Convex action   attach the assertion → re-simulate → submit gaslessly  ◄┘
+```
 
----
+Smart Account Kit is written for a browser, where that round trip is one `await`. It works
+server-side only because it takes its WebAuthn implementation as an injected dependency and
+never verifies the challenge it generated — so each half can hand it a function that
+*already has the answer*. `buildKit` in `stellar/passkeyNode.ts` is where that injection
+happens.
+
+### Five things that are load-bearing
+
+- **Never recompute the auth digest by hand.** It binds the *context rule ids*, and a `tip`
+  has **two** auth contexts — the call, and the SAC transfer nested inside it. Hardcoding
+  `[0]` yields contract error 10000. `prepareTip` gets the challenge by running the kit's
+  real signing path and aborting it the instant it reaches for the device, so both halves
+  derive the digest from identical code.
+- **A stored credential needs all four birth fields**, or it cannot be connected
+  server-side: `birthWasmHash`, `creationTransactionHash`, `creationLedger`, and
+  `birthConstructorArgsHash`. The first three keep the kit off the public indexer, which
+  lags the network and does not serve the claim it wants. The fourth marks the credential
+  *locally approved* — and **only a locally approved credential connects without a fresh
+  WebAuthn assertion**, which a Convex action has no authenticator to produce. Take all
+  four from the kit's own storage after `createWallet`; do not reconstruct them.
+  `connectStoredWallet` refuses an incomplete set rather than falling through.
+- **The transaction never leaves the server.** The browser holds an opaque tip id and 32
+  bytes to sign. There is no client-supplied envelope to validate, which is a whole class
+  of bug that does not exist here — the Freighter path needed `preparedTxHash` for exactly
+  that, and the field is now dead weight kept only so old rows still validate.
+- **Re-simulate after signing.** A WebAuthn signature is far larger than the placeholder
+  used at first simulation, so the assembled resource fee is wrong until the transaction is
+  simulated again. `signAndSubmitAdmin` does this; skipping it fails *after* Face ID.
+- **Never call Horizon on a `C…` address.** A smart account has no classic account and no
+  trustline — the SAC keeps its balance in contract storage — so `loadAccount` 404s
+  forever. `readSacBalance` is the only balance read correct for both address kinds.
+
+### Gasless submission
+
+A contract cannot be a transaction's source or pay its fee, so OpenZeppelin Channels
+supplies the source, sequence number and fee. `stellar/relayer.ts` is a hand-rolled client
+because the kit's own `RelayerClient` sends no `Authorization` header — it is written for a
+browser talking to a proxy that holds the key. We submit from an action, so the key is
+already server-side and a proxy would buy nothing; `buildKit` overrides `kit.relayer.send`
+to keep the kit's submission path with our header.
+
+> **The relayer API key must never reach the client.** It authorises spending someone
+> else's XLM on fees. A leaked key is an open relay, not a data leak. This is also why
+> there is no Convex `httpAction` proxy — that would put an internet-facing endpoint in
+> front of it.
+
+### Debugging it
+
+`DEBUG_ERRORS=true` in the Convex environment attaches the full error — `cause` chain,
+stack frames, the fields these errors hide outside `message` — to the `ConvexError` the
+browser receives, where the profile and tip sheet render it in a copyable panel. Server-side
+logging is unconditional; grep the Convex logs for `[musea]`.
+
+Keep it **off** for the demo. And note that **Vercel's logs are always empty for this** —
+the browser talks to Convex directly, so nothing in this flow runs on Vercel at all.
 
 ## Skills
 
@@ -342,6 +388,13 @@ The passkey is the deliverable, and Safari is stricter than Chrome about all of 
   `secp256r1_verify` wants raw 64-byte `r‖s`, low-S normalized. This is the single most
   likely source of "valid signature, contract says no."
 - Private browsing still has iCloud Keychain passkeys, but storage is harsher — test there.
+
+> **A software authenticator will not catch everything, and it hid a real bug here.** The
+> Story 2B.0 spike proved the cryptography headlessly with a WebCrypto P-256 authenticator,
+> which happily answered *any* WebAuthn call the kit made — including the one
+> `connectWallet` makes to verify credential ownership. Server-side that call can never be
+> answered, and the failure only appeared on a real device. A software authenticator proves
+> the signature path; it cannot prove that the server never needs an authenticator at all.
 
 ---
 

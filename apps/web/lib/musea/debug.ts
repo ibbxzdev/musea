@@ -4,7 +4,7 @@ import { ConvexError } from "convex/values";
 import { PasskeyError } from "./passkey";
 
 /**
- * Error diagnostics — temporary, for the first real-device pass.
+ * Error diagnostics for a device with no console attached.
  *
  * On an iPhone there is no console to open, and the failures that matter here happen in
  * three different places that all end up saying the same thing to the user:
@@ -46,10 +46,6 @@ export function describeError(error: unknown): string {
     // Only present while DEBUG_ERRORS is on server-side. Its absence is itself a signal:
     // it means the failure never reached one of our classified catch blocks.
     if (data?.debug) lines.push(data.debug);
-    else
-      lines.push(
-        "  (no server debug payload — DEBUG_ERRORS is off, or this threw outside a handler)",
-      );
   } else {
     lines.push(describeRaw(error));
   }

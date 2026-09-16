@@ -1,28 +1,40 @@
 /**
- * Diagnostics — temporary, for the first real-device pass.
+ * Diagnostics for failures that happen where no console can reach.
  *
- * Every Stellar failure normally leaves as a `ConvexError` carrying a classified code and
- * a sentence written for a human, with the real text going only to `tips.errorDetail`.
- * That is right for users and useless for debugging a device we cannot attach a console
- * to: on an iPhone the whole failure reads "Something went wrong."
+ * Every Stellar failure leaves as a `ConvexError` carrying a classified code and a
+ * sentence written for a human. That is right for users and, on its own, useless for
+ * debugging a phone: on an iPhone the entire failure reads "Something went wrong", there
+ * is no console to open, and none of this runs on Vercel — the browser talks to Convex
+ * directly — so the hosting logs are empty too.
  *
- * So this does two things, and both are deliberately loud:
+ * Two pieces:
  *
- *   - `diagnosticFor` unwraps the error properly — name, message, the `cause` chain, and
- *     the top stack frames. Most of what breaks here arrives wrapped: an RPC failure
- *     inside a kit error inside ours, where only the innermost layer names the cause.
- *   - `DEBUG_ERRORS` gates whether that text is attached to the `ConvexError` the client
- *     receives. It is server-side text — RPC responses, contract error codes, kit
- *     internals — and it is not written for users.
+ *   - `diagnosticFor` unwraps an error properly: name, message, the `cause` chain, and the
+ *     top stack frames. Most of what breaks here arrives wrapped — an RPC failure inside a
+ *     kit error inside ours — and only the innermost layer names the cause. This is what
+ *     turned "prepare tip failed: UNKNOWN" into the two sentences that located both
+ *     provisioning bugs in Epic 2B.
+ *   - `DEBUG_ERRORS` gates whether that text is *also* attached to the `ConvexError` the
+ *     client receives, where the profile and tip sheet render it in a copyable panel.
  *
- * **There is no key material to leak here** (CLAUDE.md rule 3): the signing key lives in
- * the Secure Enclave and this deployment holds no secret but the relayer key, which never
- * appears in an error. What this *does* expose is internal shape. Turn it off for the
- * demo by setting `DEBUG_ERRORS=false` in the Convex environment.
+ * **There is no key material to leak** (CLAUDE.md rule 3): the signing key lives in the
+ * Secure Enclave and this deployment holds no secret but the relayer key, which never
+ * appears in an error. What the client-side half does expose is internal shape — contract
+ * addresses, kit internals, stack frames — so it is off unless asked for.
+ *
+ * Server-side logging is unconditional. It costs nothing and it is the half that made the
+ * difference; only the client payload is switched.
  */
 
-/** Default-on so the first device pass produces something readable without a redeploy. */
-export const DEBUG_ERRORS = process.env.DEBUG_ERRORS !== "false";
+/**
+ * Whether failures carry their diagnostic text to the browser.
+ *
+ * Opt-in: set `DEBUG_ERRORS=true` in the Convex environment while working on the passkey
+ * path, and leave it unset everywhere else — notably before recording the demo, where an
+ * error panel full of stack frames is not what the deliverable should show. Defaulting
+ * off means a new deployment is never accidentally verbose.
+ */
+export const DEBUG_ERRORS = process.env.DEBUG_ERRORS === "true";
 
 /** How much of any one error to keep. RPC failures carry very large XDR blobs. */
 const MAX_LENGTH = 1500;

@@ -64,14 +64,6 @@ export type AuthenticationResponseJSON = {
 /** Shown in the OS passkey sheet. Users see this next to the domain. */
 const APP_NAME = "Musea";
 
-/**
- * How much test XLM a new account starts with, in whole XLM.
- *
- * Friendbot funds a temporary classic account and the kit forwards it through the SAC, so
- * this is bounded by what Friendbot gives out, not by the treasury.
- */
-const FUND_RESERVE_NOTE = "Funded via Friendbot through the native SAC.";
-
 // ─────────────────────────────────────────────────────────────── registration, step 1
 
 /**
@@ -660,5 +652,3 @@ function detail(error: unknown): string {
   const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   return text.slice(0, 2000);
 }
-
-export { FUND_RESERVE_NOTE };
