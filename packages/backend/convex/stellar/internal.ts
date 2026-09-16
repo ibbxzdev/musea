@@ -159,6 +159,7 @@ export const markSmartAccountDeployed = internalMutation({
   args: {
     accountId: v.id("smartAccounts"),
     birthWasmHash: v.string(),
+    birthConstructorArgsHash: v.string(),
     creationTransactionHash: v.string(),
     creationLedger: v.number(),
   },

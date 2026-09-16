@@ -33,6 +33,7 @@ export function WalletCard() {
   const finishRegistration = useAction(api.stellar.passkey.finishRegistration);
   const getBalance = useAction(api.stellar.passkey.getMyBalance);
   const fundWallet = useAction(api.stellar.passkey.fundMyWallet);
+  const forgetWallet = useAction(api.stellar.passkey.forgetWallet);
 
   const [options, setOptions] = React.useState<unknown>(null);
   const [creating, setCreating] = React.useState(false);
@@ -80,6 +81,28 @@ export function WalletCard() {
   React.useEffect(() => {
     if (wallet?.status === "deployed") void refreshBalance();
   }, [wallet?.status, refreshBalance]);
+
+  /**
+   * Detach an account that can no longer be connected, so a fresh one can be made.
+   *
+   * Nothing on-chain is touched — the contract keeps existing and keeps its balance, and
+   * the passkey stays in the keychain. This only unlinks it from the profile. Offered only
+   * for `needsReset`, because for a healthy wallet it would be a way to lose one.
+   */
+  const handleReset = async () => {
+    if (creating) return;
+    setCreating(true);
+    try {
+      await forgetWallet({});
+      setBalance(null);
+      setDetail(null);
+    } catch (error) {
+      setDetail(logError("forgetWallet", error));
+      toast.error(walletErrorMessage(error));
+    } finally {
+      setCreating(false);
+    }
+  };
 
   /**
    * Fill a wallet that deployed but never funded.
@@ -180,6 +203,31 @@ export function WalletCard() {
         ) : null}
         <Button onClick={handleCreate} disabled={creating} className="tap-target w-full">
           {creating ? "Setting up…" : "Create wallet with Face ID"}
+        </Button>
+        <ErrorDetail detail={detail} />
+      </div>
+    );
+  }
+
+  if (wallet.needsReset) {
+    return (
+      <div className="space-y-3 rounded-2xl border border-destructive/40 p-4">
+        <div className="flex items-center gap-2">
+          <TriangleAlert className="size-4 text-destructive" />
+          <p className="text-sm font-medium">This wallet needs to be replaced</p>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          It was created before Musea recorded everything needed to use it, so tipping and funding
+          can&apos;t work. Making a new one takes one tap. The old wallet stays on Stellar and is
+          empty.
+        </p>
+        <p className="font-mono text-xs text-muted-foreground">{shorten(wallet.contractAddress)}</p>
+        <Button
+          onClick={() => void handleReset()}
+          disabled={creating}
+          className="tap-target w-full"
+        >
+          {creating ? "Working…" : "Start over"}
         </Button>
         <ErrorDetail detail={detail} />
       </div>

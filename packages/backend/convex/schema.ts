@@ -234,6 +234,16 @@ export default defineSchema({
      * only knowable once it has landed.
      */
     birthWasmHash: v.optional(v.string()),
+    /**
+     * Hash of the immutable constructor argument vector, from the deployment itself.
+     *
+     * What makes a stored credential "locally approved" in Smart Account Kit: a credential
+     * carrying it is one this app deployed and can verify against its own record, so
+     * connecting skips the fresh-WebAuthn-assertion check. Without it the kit demands an
+     * assertion on every connect — which a Convex action cannot produce, since the
+     * authenticator is on the user's phone.
+     */
+    birthConstructorArgsHash: v.optional(v.string()),
     creationTransactionHash: v.optional(v.string()),
     creationLedger: v.optional(v.number()),
 

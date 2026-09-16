@@ -59,6 +59,20 @@ export const getMyWallet = query({
       funded: v.boolean(),
       rpId: v.string(),
       createdAt: v.number(),
+      /**
+       * The account is deployed but cannot be used, and re-trying will not fix it.
+       *
+       * True for accounts provisioned before `birthConstructorArgsHash` was recorded.
+       * Smart Account Kit will only connect a stored credential without a fresh WebAuthn
+       * assertion when that hash is present, and a Convex action has no authenticator to
+       * produce one — so these accounts fail every connect, at funding and at tipping
+       * alike. The hash comes from the deployment and cannot be recovered afterwards, so
+       * the only way out is a new passkey and a new account.
+       *
+       * Reported rather than hidden: the alternative is a wallet that renders as healthy
+       * and fails on every action.
+       */
+      needsReset: v.boolean(),
     }),
   ),
   handler: async (ctx) => {
@@ -79,6 +93,7 @@ export const getMyWallet = query({
       funded: account.funded,
       rpId: account.rpId,
       createdAt: account.createdAt,
+      needsReset: account.status === "deployed" && !account.birthConstructorArgsHash,
     };
   },
 });

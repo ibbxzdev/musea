@@ -201,6 +201,29 @@ export const provisionSmartAccount = internalAction({
 
       const publicKeyHex = Buffer.from(created.publicKey).toString("hex");
 
+      /**
+       * The birth facts, read back from the kit's own record of the deployment it just built.
+       *
+       * `createWallet` derives these from the actual `CreateContractV2` operation and writes
+       * them to its storage. Taking them from there rather than reconstructing them is the
+       * difference between a credential the kit will trust later and one it will not:
+       * `birthConstructorArgsHash` is what marks a stored credential as *locally approved*,
+       * and only a locally approved credential can be connected without a fresh WebAuthn
+       * assertion. A Convex action has no authenticator to produce one, so a credential
+       * missing this field cannot be connected server-side at all — which is every wallet
+       * this code provisioned before the field existed.
+       *
+       * It is also the authoritative wasm hash. The config value is what we asked to
+       * deploy; this is what was deployed.
+       */
+      const birth = await storage.get(created.credentialId);
+      if (!birth?.birthConstructorArgsHash || !birth.birthWasmHash) {
+        throw new TipError(
+          "PASSKEY_PROVISIONING_FAILED",
+          `Smart Account Kit recorded no birth constructor args hash for ${created.credentialId}.`,
+        );
+      }
+
       // Record before submitting, so a deployment that lands while the response is lost
       // still has a row to reconcile against rather than becoming an orphan account.
       const accountId: Id<"smartAccounts"> = await ctx.runMutation(
@@ -225,9 +248,10 @@ export const provisionSmartAccount = internalAction({
 
       // ── 3. Record the birth ──────────────────────────────────────────────────────────
       // Not bookkeeping: `connectWallet` refuses an account whose immutable birth it
-      // cannot verify, and without these three it falls back to the public indexer, which
-      // does not serve the claim it wants. Persisting them keeps the indexer off the
-      // critical path permanently. See Story 2B.0, finding 3.
+      // cannot verify, and without these it falls back to the public indexer, which does
+      // not serve the claim it wants. Persisting them keeps the indexer off the critical
+      // path permanently, and the constructor args hash keeps the authenticator off it —
+      // see the note on `birth` above. Story 2B.0, finding 3.
       step = "confirm-deployment";
       const rpc = new StellarSdk.rpc.Server(cfg.rpcUrl);
       const creationTx = await rpc.pollTransaction(deployHash, { attempts: 30 });
@@ -240,7 +264,8 @@ export const provisionSmartAccount = internalAction({
 
       await ctx.runMutation(internal.stellar.internal.markSmartAccountDeployed, {
         accountId,
-        birthWasmHash: cfg.accountWasmHash,
+        birthWasmHash: birth.birthWasmHash,
+        birthConstructorArgsHash: birth.birthConstructorArgsHash,
         creationTransactionHash: deployHash,
         creationLedger: creationTx.ledger,
       });
@@ -256,7 +281,8 @@ export const provisionSmartAccount = internalAction({
           contractAddress: created.contractId,
           credentialId: created.credentialId,
           publicKeyHex,
-          birthWasmHash: cfg.accountWasmHash,
+          birthWasmHash: birth.birthWasmHash,
+          birthConstructorArgsHash: birth.birthConstructorArgsHash,
           creationTransactionHash: deployHash,
           creationLedger: creationTx.ledger,
         });
@@ -308,6 +334,7 @@ async function fundIfEmpty(
     credentialId: string;
     publicKeyHex: string;
     birthWasmHash?: string;
+    birthConstructorArgsHash?: string;
     creationTransactionHash?: string;
     creationLedger?: number;
   },
@@ -524,27 +551,35 @@ export async function connectStoredWallet(
     credentialId: string;
     publicKeyHex: string;
     birthWasmHash?: string;
+    birthConstructorArgsHash?: string;
     creationTransactionHash?: string;
     creationLedger?: number;
   },
 ): Promise<void> {
   /**
-   * All three birth fields, or none of this works.
+   * Every birth field, or none of this works — and it fails twice, differently.
    *
    * `connectWallet` verifies an account's immutable birth from the stored credential only
-   * when the wasm hash, creation transaction and creation ledger are *all* present. Miss
-   * one and it silently asks the public indexer instead — which lags the network by a few
-   * ledgers and does not serve the claim it needs anyway. The failure then surfaces as
-   * `WalletProvenanceError` 2005 blaming indexer staleness, which is true and completely
-   * misleading: the data was in our own row the whole time.
+   * when the wasm hash, creation transaction and creation ledger are all present. Miss one
+   * and it silently asks the public indexer instead, which lags the network and does not
+   * serve the claim it needs anyway; the failure surfaces as `WalletProvenanceError` 2005
+   * blaming indexer staleness — true, and completely misleading, because the data was in
+   * our own row the whole time.
    *
-   * Refusing here costs nothing, because the indexer path has never once succeeded in this
-   * project. It turns a confusing error about someone else's infrastructure into a
-   * sentence naming the field we failed to pass.
+   * `birthConstructorArgsHash` gates something else. It is what marks a credential as
+   * *locally approved*: one this app deployed and can verify against its own record. Only
+   * a locally approved credential connects without a fresh WebAuthn assertion, and a
+   * Convex action has no authenticator to produce one — so without it, connecting fails
+   * with "No WebAuthn assertion was injected" no matter how complete the rest is.
+   *
+   * Refusing here costs nothing, because neither fallback can ever succeed server-side. It
+   * turns two confusing errors about someone else's infrastructure into a sentence naming
+   * the field we failed to pass.
    */
   const missing = (
     [
       ["birthWasmHash", account.birthWasmHash],
+      ["birthConstructorArgsHash", account.birthConstructorArgsHash],
       ["creationTransactionHash", account.creationTransactionHash],
       ["creationLedger", account.creationLedger],
     ] as const
@@ -568,6 +603,7 @@ export async function connectStoredWallet(
     isPrimary: true,
     deploymentStatus: "deployed",
     birthWasmHash: account.birthWasmHash,
+    birthConstructorArgsHash: account.birthConstructorArgsHash,
     creationTransactionHash: account.creationTransactionHash,
     creationLedger: account.creationLedger,
   };
@@ -611,6 +647,7 @@ export async function connectedKitFor(
     credentialId: account.credentialId,
     publicKeyHex: account.publicKeyHex,
     birthWasmHash: account.birthWasmHash,
+    birthConstructorArgsHash: account.birthConstructorArgsHash,
     creationTransactionHash: account.creationTransactionHash,
     creationLedger: account.creationLedger,
   });
