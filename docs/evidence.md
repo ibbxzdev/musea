@@ -194,15 +194,26 @@ is the pass condition.
 | | |
 |---|---|
 | Live URL | https://musea-tips.vercel.app |
-| Commit deployed | **TO FILL IN**, see below |
+| Commit deployed | `0674d8c6d0fb66513150f85095c3b4ecde42e70f` |
+| This exact build, permanently | https://musea-tips-h8dy5kbcr-ibonajjars-projects.vercel.app |
+| Built | 2026-09-16 01:22:46 UTC, from branch `main` |
 | Host | Vercel |
 | Backend | Convex deployment `zealous-stork-862` |
 
-**To fill in before submitting.** The deployed commit has to be the one this bundle
-describes. Find it in the Vercel dashboard, under Deployments, on the production deployment,
-and paste the full 40-character SHA here. If the production deployment predates the commit
-that adds this file, redeploy first. An evidence bundle describing a commit the live site
-wasn't built from is worse than no bundle.
+That commit is the tip of `main` and is what the live site was built from. The deployment
+URL in the third row is immutable: Vercel pins it to this one build forever, so it stays
+verifiable even after later deploys move the `musea-tips.vercel.app` alias on.
+
+Anyone can confirm the pairing:
+
+```bash
+vercel inspect musea-tips.vercel.app          # deployment id and status
+gh api repos/<owner>/<repo>/commits/0674d8c   # the commit itself
+```
+
+The documentation in this `docs/` folder was added on top of that commit and doesn't change
+application behaviour, so what a reviewer opens at the live URL is the code at the SHA
+above.
 
 The WebAuthn Relying Party ID is `musea-tips.vercel.app`, and that matters for anyone
 testing. A passkey is bound to the exact domain that created it, so a credential made on
@@ -609,11 +620,10 @@ Listed plainly, because a bundle that overstates itself is worse than one with a
 
 | Gap | Status | Owner |
 |---|---|---|
-| The deployed commit hash | Not filled in | Project owner, section 2.1 |
 | Anything on mainnet | Out of scope | — |
 
 Everything else has been exercised on a real iPhone, including the Activity page and the
-Stellar Expert receipt links. The only thing left is pasting in the commit SHA.
+Stellar Expert receipt links.
 
 ---
 
