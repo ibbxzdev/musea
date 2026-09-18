@@ -34,7 +34,7 @@ type RegistrationOptions = {
  * `internal.stellar.passkeyNode.*`.
  *
  * **Nothing here takes a `userId`.** Whose wallet is being created, and who is tipping
- * from it, is always whoever `ctx.auth` says is calling — CLAUDE.md rule 2. A
+ * from it, is always whoever `ctx.auth` says is calling — docs/architecture.md rule 2. A
  * client-supplied id on any of these would let one user provision or spend as another.
  */
 

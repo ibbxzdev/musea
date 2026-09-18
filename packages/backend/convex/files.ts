@@ -7,7 +7,7 @@ import { requireCurrentUser } from "./model/auth";
  * Uploads.
  *
  * The phone app's `files.saveFile` takes a `userId` argument and writes it to the row.
- * That is CLAUDE.md's rule 2 exactly, so it is not ported: the owner comes from
+ * That is docs/architecture.md's rule 2 exactly, so it is not ported: the owner comes from
  * `ctx.auth`.
  *
  * Nothing stores a storage *URL*. Convex storage URLs are resolved per read

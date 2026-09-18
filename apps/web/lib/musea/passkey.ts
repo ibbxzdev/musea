@@ -10,7 +10,7 @@ import type { TipErrorCode } from "@musea/shared/errors";
  * `navigator.credentials` is a browser platform API, not a blockchain library: the device
  * is handed 32 bytes and returns a signature over them. It never learns what those bytes
  * mean, never builds a transaction, and never sees an address. That is what keeps
- * CLAUDE.md rule 1 intact while the wallet is genuinely non-custodial — and why the ESLint
+ * docs/architecture.md rule 1 intact while the wallet is genuinely non-custodial — and why the ESLint
  * rule permits `@simplewebauthn/browser` while blocking `smart-account-kit`, which would
  * drag the whole Stellar SDK into the bundle to do the same job.
  *

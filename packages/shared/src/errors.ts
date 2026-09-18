@@ -61,7 +61,7 @@ export const CONTRACT_ERRORS = {
  *
  * These numbers are the SAC's own error enum, confirmed against testnet rather than read
  * off a table: #13 is what a missing recipient trustline actually returned during the
- * Epic 1 rehearsal (see docs/stories/epic-1-contract.md).
+ * Epic 1 rehearsal against the deployed contract.
  */
 export const SAC_ERRORS = {
   10: "BalanceError",

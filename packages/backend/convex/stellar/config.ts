@@ -25,8 +25,17 @@ export type StellarConfig = {
    */
   xlmSacId: string;
   tipjarContractId: string;
+  /**
+   * A project-owned testnet account, used **read-only**: it is the source account for
+   * simulating contract reads, which need one but never submit anything.
+   *
+   * There is deliberately no secret counterpart here. Nothing in this codebase signs as
+   * the treasury — new wallets are funded through Smart Account Kit — so holding its
+   * secret key would be a credential with no purpose, and the only Stellar secret in the
+   * environment. Removing it is what makes "Musea holds no key material" unqualified
+   * rather than nearly true.
+   */
   treasuryPublic: string;
-  treasurySecret: string;
   /** Test XLM granted to each newly provisioned wallet, as a display string. */
   seedAmount: string;
 
@@ -69,7 +78,7 @@ function required(name: string): string {
     throw new Error(
       `Missing Convex environment variable ${name}. ` +
         `Set it in the Convex dashboard (Settings -> Environment Variables). ` +
-        `See .env.example for the full list and scripts/README.md for how to produce the values.`,
+        `See .env.example for the full list, and scripts/setup-testnet.sh for how to produce them.`,
     );
   }
   return value.trim();
@@ -92,7 +101,6 @@ export function stellarConfig(): StellarConfig {
     xlmSacId: required("XLM_SAC_ID"),
     tipjarContractId: required("TIPJAR_CONTRACT_ID"),
     treasuryPublic: required("TREASURY_PUBLIC"),
-    treasurySecret: required("TREASURY_SECRET"),
     seedAmount: process.env.SEED_AMOUNT?.trim() || "100",
 
     accountWasmHash: required("SMART_ACCOUNT_WASM_HASH"),
@@ -123,7 +131,6 @@ export function stellarConfig(): StellarConfig {
   }
 
   assertShape("TREASURY_PUBLIC", config.treasuryPublic, "G");
-  assertShape("TREASURY_SECRET", config.treasurySecret, "S");
   assertShape("XLM_SAC_ID", config.xlmSacId, "C");
   assertShape("TIPJAR_CONTRACT_ID", config.tipjarContractId, "C");
   assertShape("WEBAUTHN_VERIFIER_ADDRESS", config.webauthnVerifierAddress, "C");

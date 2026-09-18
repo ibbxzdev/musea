@@ -250,7 +250,7 @@ export default defineSchema({
    * credential id is a public WebAuthn handle, and the public key is, definitionally,
    * public. The signing key was generated inside the device's Secure Enclave and is not
    * extractable — not by the browser, not by us. There is deliberately no field here that
-   * a total backend compromise could turn into a spend, which is CLAUDE.md rule 3 and the
+   * a total backend compromise could turn into a spend, which is docs/architecture.md rule 3 and the
    * reason the custodial `stellarWallets` table this replaces is gone rather than migrated.
    *
    * One row per user: `by_user` is the lookup every tip goes through, and a second account

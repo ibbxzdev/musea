@@ -4,7 +4,7 @@ import { baseConfig } from "./base.js";
  * Flat config for the Next.js web app.
  *
  * The important rule here is the `no-restricted-imports` block. The golden rule of this
- * project (see docs/Musea_Stellar_Implementation_Spec.md) is that no blockchain code
+ * project (see docs/architecture.md) is that no blockchain code
  * runs in the browser: every Stellar operation happens inside a Convex Node action.
  * If a Stellar package ever lands in the client bundle we have shipped hundreds of KB
  * to a phone for nothing — and, far worse, moved key-adjacent code next to the client.

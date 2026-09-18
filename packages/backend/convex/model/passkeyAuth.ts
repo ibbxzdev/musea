@@ -35,7 +35,7 @@ import type { DataModel } from "../_generated/dataModel";
  *
  * **No Stellar import here.** This module runs in Convex's default runtime, where
  * `@stellar/stellar-sdk` cannot load. It reaches crypto only by `runAction` into a
- * `"use node"` module, which is what CLAUDE.md rule 1 asks for regardless of runtime.
+ * `"use node"` module, which is what docs/architecture.md rule 1 asks for regardless of runtime.
  *
  * ## The two failure modes worth knowing before changing anything
  *

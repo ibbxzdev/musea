@@ -16,8 +16,7 @@
  * mode is silent corruption rather than an error, so we don't rely on it.
  *
  * The 7-decimal scale is a property of the Stellar protocol, not of a particular asset —
- * it was the same when tips moved USDC and it would be the same for any other classic
- * asset. Only the naming here is asset-specific.
+ * it is the same for XLM and for any issued asset. Only the naming here is asset-specific.
  */
 
 /** Decimal places for a classic Stellar asset. Fixed by the protocol — not a preference. */

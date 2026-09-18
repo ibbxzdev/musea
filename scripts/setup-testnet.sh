@@ -97,7 +97,6 @@ echo "  TipJar: $TIPJAR_CONTRACT_ID"
 # ---------------------------------------------------------------------------
 step "Environment variables"
 # ---------------------------------------------------------------------------
-TREASURY_SECRET="$(stellar keys show musea-treasury)"
 AUTH_SECRET="$(openssl rand -base64 32)"
 
 cat <<CONFIG
@@ -113,18 +112,29 @@ or run each as: npx convex env set NAME 'value'
   XLM_SAC_ID=$XLM_SAC_ID
   TIPJAR_CONTRACT_ID=$TIPJAR_CONTRACT_ID
   TREASURY_PUBLIC=$TREASURY
-  TREASURY_SECRET=$TREASURY_SECRET
   SEED_AMOUNT=$SEED_AMOUNT
   BETTER_AUTH_SECRET=$AUTH_SECRET
 
+Four more this script cannot produce, because they are not ours to deploy or
+generate. Set them by hand — see .env.example for what each one is:
+
+  SMART_ACCOUNT_WASM_HASH=    # OpenZeppelin smart-account WASM, 64 hex chars
+  WEBAUTHN_VERIFIER_ADDRESS=  # C... on-chain secp256r1 verifier
+  WEBAUTHN_RP_ID=             # the domain passkeys bind to. Decide it BEFORE
+                              # anyone registers: a credential made under one
+                              # RP ID does not resolve under another.
+  RELAYER_API_KEY=            # https://channels.openzeppelin.com/testnet/gen
+                              # SECRET. Server-side only, always — it authorises
+                              # spending someone else's XLM on fees.
+
 If you are migrating an existing deployment, remove the variables that no longer
 exist, or stellarConfig() will keep validating values nothing reads:
-  npx convex env remove USDC_ASSET_CODE
-  npx convex env remove USDC_ISSUER
-  npx convex env remove USDC_SAC_ID
-  npx convex env remove MASTER_ENCRYPTION_KEY
+  npx convex env remove TREASURY_SECRET
 
 Verify the deploy:
   https://stellar.expert/explorer/testnet/contract/$TIPJAR_CONTRACT_ID
+
+Then regenerate the evidence bundle — a testnet reset kills every link in it:
+  docs/evidence.md
 
 CONFIG

@@ -23,7 +23,7 @@ if (cargoMissing) {
     `cargo not found — skipping \`cargo ${args.join(" ")}\`.\n` +
     `   The TipJar contract is NOT being checked. Install Rust to build it:\n` +
     `     https://rustup.rs   then: cargo install --locked stellar-cli\n` +
-    `   See docs/stories/epic-0-foundation.md, Story 0.1.`;
+    `   See README.md, Quick start.`;
 
   if (isCI) {
     console.error(`error: ${message}`);

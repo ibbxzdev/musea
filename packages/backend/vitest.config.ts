@@ -10,10 +10,11 @@ import { defineConfig } from "vitest/config";
  * the point of running these at all.
  *
  * What this cannot cover: `"use node"` modules. convex-test does not execute them, so
- * `stellar/walletsNode.ts` and `stellar/tipsNode.ts` are out of reach here and are
- * verified against real testnet instead (see docs/stories/epic-2-backend.md). That
- * limitation is exactly why the auth guards were split out into isolate-runtime modules —
- * the rule CLAUDE.md calls non-negotiable is in the half that tests can reach.
+ * `stellar/tipsNode.ts`, `stellar/passkeyNode.ts` and `stellar/passkeyAuthNode.ts` are out
+ * of reach here and are verified against real testnet instead — the transaction hashes in
+ * docs/evidence.md are that verification. That limitation is exactly why the auth guards
+ * were split out into isolate-runtime modules: the rule docs/architecture.md calls non-negotiable is
+ * in the half that tests can reach.
  */
 export default defineConfig({
   test: {

@@ -17,7 +17,7 @@
  *   - `DEBUG_ERRORS` gates whether that text is *also* attached to the `ConvexError` the
  *     client receives, where the profile and tip sheet render it in a copyable panel.
  *
- * **There is no key material to leak** (CLAUDE.md rule 3): the signing key lives in the
+ * **There is no key material to leak** (docs/architecture.md rule 3): the signing key lives in the
  * Secure Enclave and this deployment holds no secret but the relayer key, which never
  * appears in an error. What the client-side half does expose is internal shape — contract
  * addresses, kit internals, stack frames — so it is off unless asked for.

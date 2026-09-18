@@ -29,7 +29,7 @@ import { artifactKindValidator } from "./schema";
  * Ported from the phone app's `convex/artifacts.ts`, with two deliberate differences:
  *
  *   - **No `userId` argument anywhere.** The phone repo's `search.searchArtifacts` and
- *     `files.saveFile` both take one; that is an impersonation hole and CLAUDE.md's rule 2
+ *     `files.saveFile` both take one; that is an impersonation hole and docs/architecture.md's rule 2
  *     forbids it. The caller is whoever `ctx.auth` says they are, resolved through
  *     `requireCurrentUser`.
  *   - **No AI.** Saving a URL schedules `linkPreview.enrichArtifact`, which reads oEmbed

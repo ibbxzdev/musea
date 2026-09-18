@@ -206,7 +206,7 @@ export const attachPreparedTip = internalMutation({
  * Load a pending tip for submission, proving it belongs to the caller.
  *
  * The two-step external flow hands a `tipId` to the browser and takes it back, which makes
- * it a client-supplied id — exactly the shape CLAUDE.md rule 2 is about. Without this
+ * it a client-supplied id — exactly the shape docs/architecture.md rule 2 is about. Without this
  * ownership check, one user could drive another user's pending tip to a terminal state.
  * Returning `null` rather than throwing lets the caller decide the error code.
  */

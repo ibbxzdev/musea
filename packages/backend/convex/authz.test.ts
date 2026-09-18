@@ -10,7 +10,7 @@ import type { Id } from "./_generated/dataModel";
  * Authorization negatives (Story 2.6).
  *
  * These are the tests that matter. A happy-path test proves the feature works; these prove
- * the thing CLAUDE.md calls rule 2 — the caller is whoever `ctx.auth` says, never an
+ * the thing docs/architecture.md calls rule 2 — the caller is whoever `ctx.auth` says, never an
  * argument — is actually enforced rather than merely intended.
  *
  * Every case here is written as "user B tries to reach user A's data" and asserts refusal.

@@ -11,7 +11,7 @@ import { toast } from "sonner";
  * fine in desktop Chrome. Every caller here passes a string it already has.
  *
  * The Clipboard API also needs a secure context, which is HTTPS everywhere and `localhost`.
- * That is already true of this app (see the WebAuthn notes in CLAUDE.md), so the missing-API
+ * That is already true of this app (see the WebAuthn notes in docs/architecture.md), so the missing-API
  * case is treated as a plain failure rather than given a `document.execCommand` fallback:
  * the deprecated path would only ever run somewhere the rest of the app is broken anyway.
  */

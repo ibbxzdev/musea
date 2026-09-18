@@ -26,7 +26,7 @@ import { EmptyState } from "./empty-state";
  * the curator's lifetime total read from TipJar contract state; the list underneath is our
  * own `tips` table. They are never summed from each other, so if they ever disagree the
  * disagreement is visible rather than papered over — which is the only honest way to show
- * a database record next to a chain record. Per CLAUDE.md, the chain is the authority.
+ * a database record next to a chain record. Per docs/architecture.md, the chain is the authority.
  *
  * Every settled row links to its transaction on Stellar Expert. That link is the whole
  * point of the page: a reviewer with no technical setup can tap it and confirm the amount,

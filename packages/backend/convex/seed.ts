@@ -24,7 +24,7 @@ import type { Id } from "./_generated/dataModel";
  *
  * Note what is deliberately absent: nothing here lets a caller supply `authSubject`. This
  * is an internalMutation, so it is not client-reachable at all, but a seed that could mint
- * an arbitrary identity would be a worse hole than the one CLAUDE.md's rule 2 closes.
+ * an arbitrary identity would be a worse hole than the one docs/architecture.md's rule 2 closes.
  * ──────────────────────────────────────────────────────────────────────────────────────
  */
 

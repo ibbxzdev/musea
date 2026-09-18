@@ -2,7 +2,7 @@
   "name": "musea-tips",
   "private": true,
   "version": "0.1.0",
-  "description": "Musea Curator Tips — one-tap USDC tipping on Stellar (testnet), backed by a Soroban TipJar contract.",
+  "description": "Musea Curator Tips — one-tap XLM tipping on Stellar (testnet), backed by a Soroban TipJar contract.",
   "license": "MIT",
   "packageManager": "pnpm@12.3.4",
   "engines": {

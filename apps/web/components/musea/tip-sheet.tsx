@@ -29,7 +29,7 @@ import { ResponsiveModal } from "./responsive-modal";
  * **No Stellar code here.** This component knows a gallery id and an amount string. The
  * server builds, simulates and assembles the transaction and derives an auth digest; the
  * device signs those 32 bytes; the server submits. The browser never learns what it signed.
- * That is CLAUDE.md rule 1, and the lint rule is its backstop.
+ * That is docs/architecture.md rule 1, and the lint rule is its backstop.
  *
  * **The Face ID call is synchronous inside the tap handler.** Safari consumes user
  * activation across an `await`, so `prepareTip` has to have returned the challenge before

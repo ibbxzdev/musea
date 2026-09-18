@@ -287,7 +287,7 @@ export const submitTip = internalAction({
 
     // ── 1. Ownership ─────────────────────────────────────────────────────────────────
     // The id came back from the client. Re-derive that it is this caller's and still
-    // pending before touching it — CLAUDE.md rule 2 applied to an id that must round-trip.
+    // pending before touching it — docs/architecture.md rule 2 applied to an id that must round-trip.
     const tip = await ctx.runQuery(internal.stellar.internal.getOwnedPendingTip, {
       tipId,
       userId: fromUserId,

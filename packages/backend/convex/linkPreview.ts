@@ -14,7 +14,7 @@ import { requireAuthSubject } from "./model/auth";
  * every field comes from metadata the page itself published.
  *
  * The phone app layers an LLM on top of this (`convex/ai.ts`) to rewrite the title, write
- * a summary and assign tags. That layer is deliberately not ported — see CLAUDE.md. What
+ * a summary and assign tags. That layer is deliberately not ported — see docs/architecture.md. What
  * remains is the path the phone app already falls back to when a user is over their daily
  * AI quota, so it is a supported shape rather than an improvised one.
  *
